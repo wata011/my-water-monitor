@@ -10,6 +10,8 @@ LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID           = os.getenv('LINE_TARGET_ID')
 OPENWEATHER_API_KEY      = os.getenv('OPENWEATHER_API_KEY')
 
+WEATHER_LOG_FILE = 'weather_log.csv' # เพิ่มบรรทัดนี้
+
 # Coordinates and display name for location
 LATITUDE      = 15.02
 LONGITUDE     = 100.34
@@ -105,9 +107,11 @@ def get_current_weather_event():
     try:
         resp = requests.get(url, timeout=10); resp.raise_for_status()
         data = resp.json()
+        # If weather ID starts with 5 (rain) or 2 (thunderstorm)
+        # Full list: https://openweathermap.org/weather-conditions#Weather-condition-codes-2
         wid = str(data['weather'][0]['id'])
-        if wid.startswith('5'):
-            return 'RAIN_NOW', {'dt': int(time.time()), 'value': None}
+        if wid.startswith(('5', '2')):
+            return 'RAIN_NOW', {'dt': int(time.time()), 'value': None} # value is not always available for current rain
     except requests.exceptions.RequestException as e:
         print(f"Error fetching current weather: {e}")
     return None, None
@@ -129,15 +133,23 @@ def get_weather_event():
     now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
     for entry in data.get('list', []):
         forecast_time = datetime.fromisoformat(entry['dt_txt']).replace(tzinfo=pytz.UTC)
+        # Only consider events within FORECAST_HOURS from now
         if forecast_time - now_utc > timedelta(hours=FORECAST_HOURS):
             break
-        pop      = entry.get('pop', 0)
-        rain_vol = entry.get('rain', {}).get('3h', 0)
-        temp_max = entry.get('main', {}).get('temp_max', 0)
+
+        pop      = entry.get('pop', 0) # Probability of precipitation
+        rain_vol = entry.get('rain', {}).get('3h', 0) # Rain volume for the next 3 hours
+        temp_max = entry.get('main', {}).get('temp_max', 0) # Max temperature
+
         epoch_dt = int(forecast_time.timestamp())
-        wid_str  = str(entry['weather'][0]['id'])
+        wid_str  = str(entry['weather'][0]['id']) # Weather ID string
+
+        # Check for rain forecast
+        # Weather ID starts with 5 (rain) or 2 (thunderstorm)
         if wid_str.startswith(('5', '2')) and pop >= RAIN_CONF_THRESHOLD and rain_vol >= MIN_RAIN_MM:
             return 'FORECAST_RAIN', {'dt': epoch_dt, 'value': rain_vol}
+
+        # Check for heat wave
         if temp_max >= HEAT_THRESHOLD:
             return 'HEAT_WAVE', {'dt': epoch_dt, 'value': temp_max}
     return None, None
@@ -157,13 +169,27 @@ def main():
             if send_line(format_message(event_now, data_now)):
                 state['last_alert_times'][event_now] = now_ts
                 write_state(STATE_FILE, state)
+                # บันทึกเหตุการณ์ลง weather_log.csv
+                tz = pytz.timezone('Asia/Bangkok')
+                now_th = datetime.now(tz)
+                value_to_log = data_now['value'] if data_now and 'value' in data_now else 'N/A'
+                with open(WEATHER_LOG_FILE, 'a', encoding='utf-8') as f:
+                    f.write(f"{now_th.isoformat()},{event_now},{value_to_log}\n")
+                print(f"[INFO] อัปเดต {WEATHER_LOG_FILE} สำหรับเหตุการณ์ปัจจุบัน")
         return
 
     # 2) Forecast
     event_fc, data_fc = get_weather_event()
     if not event_fc:
         print("No significant weather events within next period.")
+        # แม้จะไม่มีเหตุการณ์ ก็ยังบันทึก log เพื่อให้เห็นว่ามีการรัน
+        tz = pytz.timezone('Asia/Bangkok')
+        now_th = datetime.now(tz)
+        with open(WEATHER_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"{now_th.isoformat()},NO_SIGNIFICANT_EVENT,N/A\n")
+        print(f"[INFO] อัปเดต {WEATHER_LOG_FILE} เรียบร้อย (ไม่มีเหตุการณ์สำคัญ)")
         return
+
     now_ts     = time.time()
     last_ts    = last_alert_times.get(event_fc, 0)
     fc_dt      = data_fc['dt']
@@ -177,6 +203,12 @@ def main():
         state['last_alert_times'][event_fc]        = now_ts
         state['last_alerted_forecasts'][event_fc] = {'dt': fc_dt, 'value': data_fc['value']}
         write_state(STATE_FILE, state)
+        # บันทึกเหตุการณ์ลง weather_log.csv
+        tz = pytz.timezone('Asia/Bangkok')
+        now_th = datetime.now(tz)
+        with open(WEATHER_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"{now_th.isoformat()},{event_fc},{data_fc['value']}\n")
+        print(f"[INFO] อัปเดต {WEATHER_LOG_FILE} สำหรับพยากรณ์อากาศ")
 
 if __name__ == '__main__':
     main()
