@@ -13,9 +13,9 @@ LINE_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET = os.getenv('LINE_TARGET_ID')
 
 # Paths to your existing logs/state files
-CHAOP_LOG    = 'historical_log.csv'      # from scraper.py
-INBURI_LOG   = 'inburi_log.csv'          # new: timestamp, water_level
-WEATHER_LOG  = 'weather_log.csv'         # new: timestamp,event_type,value
+CHAOP_LOG    = 'historical_log.csv'
+INBURI_LOG   = 'inburi_log.csv'
+WEATHER_LOG  = 'weather_log.csv'
 
 # ── 1) Load & plot Chaop storage ──
 try:
@@ -98,8 +98,8 @@ if not (LINE_TOKEN and LINE_TARGET):
 
 push_url = 'https://api.line.me/v2/bot/message/push'
 headers = {
-    'Authorization': f'Bearer {LINE_TOKEN}',
-    'Content-Type':  'application/json'
+    'Authorization': f"Bearer {LINE_TOKEN}", # แก้ไขให้ใช้ f-string
+    'Content-Type':  "application/json"
 }
 payload = {
     "to": LINE_TARGET,
@@ -107,8 +107,8 @@ payload = {
         {"type":"text", "text": text},
         {
           "type":"image",
-          "originalContentUrl":"https://wata011.github.io/my-water-monitor/chaop_summary.png",
-"previewImageUrl":"https://wata011.github.io/my-water-monitor/chaop_summary.png"*
+          "originalContentUrl":"https://wata011.github.io/my-water-monitor/chaop_summary.png", # URL ที่แก้ไขแล้ว
+          "previewImageUrl":"https://wata011.github.io/my-water-monitor/chaop_summary.png" # URL ที่แก้ไขแล้ว
         }
     ]
 }
