@@ -60,11 +60,6 @@ try:
     # คาดว่า format ใน log file เป็น ts,water_level,bank_level,status,below_bank,time
     df_i = pd.read_csv(INBURI_LOG, names=['ts','water_level','bank_level','status','below_bank','time'], parse_dates=['ts'])
 
-    # แปลง 'time' column เป็น datetime เพื่อใช้ในการเปรียบเทียบ
-    # เนื่องจาก 'time' ใน log อาจเป็นแค่เวลา (HH:MM) เราต้องรวมกับวันที่จาก 'ts'
-    # หรือถ้า 'ts' คือ datetime ที่ถูกต้องแล้ว ก็ใช้ 'ts' ได้เลย
-    # สมมติว่า 'ts' คือ datetime ที่ถูกต้องแล้ว
-
     latest_inb, inb_24hr_ago, _ = get_data_with_24hr_prior(df_i, 'ts', 'water_level')
 
 except FileNotFoundError:
@@ -77,8 +72,16 @@ next_evt = None
 try:
     df_w = pd.read_csv(WEATHER_LOG, names=['ts','event','value'], parse_dates=['ts'])
     now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
+
     # ❗️❗️ ส่วนที่แก้ไข ❗️❗️
-    df_w['ts_utc'] = df_w['ts'].dt.tz_localize(TZ, nonexistent='NaT').dt.tz_convert(pytz.UTC)
+    # ตรวจสอบว่าข้อมูลเวลามีโซนเวลาแล้วหรือยัง
+    if df_w['ts'].dt.tz is None:
+        # ถ้ายังไม่มี ให้กำหนดโซนเวลาไทย แล้วแปลงเป็น UTC
+        df_w['ts_utc'] = df_w['ts'].dt.tz_localize(TZ, nonexistent='NaT').dt.tz_convert(pytz.UTC)
+    else:
+        # ถ้ามีอยู่แล้ว ให้แปลงเป็น UTC ได้เลย
+        df_w['ts_utc'] = df_w['ts'].dt.tz_convert(pytz.UTC)
+
     upcoming = df_w[df_w['ts_utc'] > now_utc].copy()
     upcoming = upcoming.sort_values(by='ts_utc').reset_index(drop=True)
 
