@@ -107,8 +107,8 @@ payload = {
         {"type":"text", "text": text},
         {
           "type":"image",
-          "originalContentUrl":"<YOUR_PUBLIC_URL>/chaop_summary.png", # <--- **สำคัญมาก!**
-          "previewImageUrl":"<YOUR_PUBLIC_URL>/chaop_summary.png"    # <--- **สำคัญมาก!**
+          "originalContentUrl":"https://wata011.github.io/my-water-monitor/chaop_summary.png",
+"previewImageUrl":"https://wata011.github.io/my-water-monitor/chaop_summary.png"*
         }
     ]
 }
