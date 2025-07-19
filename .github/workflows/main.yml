@@ -8,8 +8,12 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # เพิ่มสิทธิ์ write เพื่อให้ commit ได้
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # ดึงประวัติทั้งหมด เพื่อป้องกันปัญหา merge
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -19,9 +23,10 @@ jobs:
       - name: Run scraper
         run: python scraper.py
       - name: Commit and push historical_log.csv
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add historical_log.csv
-          git commit -m "Update historical_log.csv" || echo "No changes to commit"
-          git push
+        uses: EndBug/add-and-commit@v9 # ใช้ Action สำเร็จรูปสำหรับการ Commit และ Push
+        with:
+          author_name: "github-actions[bot]"
+          author_email: "github-actions[bot]@users.noreply.github.com"
+          message: "chore: Update water data log"
+          add: "historical_log.csv"
+          push: true # ตรวจสอบให้แน่ใจว่ามีการ push
