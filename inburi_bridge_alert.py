@@ -14,7 +14,7 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from datetime import datetime
 import pytz
-import pandas as pd # เพิ่มบรรทัดนี้สำหรับ pd.notna
+import pandas as pd
 
 # -------- CONFIGURATION --------
 DATA_FILE         = "inburi_bridge_data.json"
@@ -34,33 +34,37 @@ except ValueError:
     print(f"[WARN] แปลง NOTIFICATION_THRESHOLD_M='{_raw}' ไม่สำเร็จ → ใช้ default={DEFAULT_THRESHOLD:.2f} m")
     NOTIFICATION_THRESHOLD = DEFAULT_THRESHOLD
 
-LINE_TOKEN  = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_TARGET = os.getenv("LINE_TARGET_ID")
+# LINE_TOKEN  = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") # ไม่ใช้แล้ว
+# LINE_TARGET = os.getenv("LINE_TARGET_ID") # ไม่ใช้แล้ว
 
 
 def send_line_message(msg: str):
-    """ส่งข้อความผ่าน LINE (หรือ Dry‑run)"""
-    if DRY_RUN:
-        print("[DRY‑RUN] send_line_message would send:")
-        print(msg)
-        return
+    """
+    ฟังก์ชันนี้ถูกปิดการใช้งานแล้ว เพื่อป้องกันการแจ้งเตือนซ้ำซ้อน
+    การแจ้งเตือนทั้งหมดจะถูกส่งจาก daily_summary.py เท่านั้น
+    """
+    print("[INFO] send_line_message ถูกปิดการใช้งานใน inburi_bridge_alert.py")
+    # if DRY_RUN:
+    #     print("[DRY‑RUN] send_line_message would send:")
+    #     print(msg)
+    #     return
 
-    if not (LINE_TOKEN and LINE_TARGET):
-        print("[ERROR] LINE_TOKEN/LINE_TARGET ไม่ครบ!")
-        return
+    # if not (LINE_TOKEN and LINE_TARGET):
+    #     print("[ERROR] LINE_TOKEN/LINE_TARGET ไม่ครบ!")
+    #     return
 
-    url = "https://api.line.me/v2/bot/message/push"
-    headers = {
-        "Authorization": f"Bearer {LINE_TOKEN}",
-        "Content-Type":  "application/json"
-    }
-    payload = {
-        "to": LINE_TARGET,
-        "messages": [{"type": "text", "text": msg}]
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=10)
-    if resp.status_code != 200:
-        print(f"[ERROR] ส่ง LINE ล้มเหลว: {resp.status_code} {resp.text}")
+    # url = "https://api.line.me/v2/bot/message/push"
+    # headers = {
+    #     "Authorization": f"Bearer {LINE_TOKEN}",
+    #     "Content-Type":  "application/json"
+    # }
+    # payload = {
+    #     "to": LINE_TARGET,
+    #     "messages": [{"type": "text", "text": msg}]
+    # }
+    # resp = requests.post(url, headers=headers, json=payload, timeout=10)
+    # if resp.status_code != 200:
+    #     print(f"[ERROR] ส่ง LINE ล้มเหลว: {resp.status_code} {resp.text}")
 
 
 def fetch_rendered_html(url: str, timeout: int = 15) -> str:
@@ -106,12 +110,13 @@ def get_water_data():
             # ดึงข้อมูลและแปลงเป็น float/string
             water_level_str = cols[1].get_text(strip=True)
             bank_level_str  = cols[2].get_text(strip=True)
-            status_str      = tr.select_one("span.badge").get_text(strip=True)
+            status_span = tr.select_one("span.badge")
+            status_str = status_span.get_text(strip=True) if status_span else 'N/A' # แก้ไขตรงนี้
             report_time_str = cols[6].get_text(strip=True)
 
             # พยายามแปลงเป็น float หากมีค่า
-            water_level = float(water_level_str) if water_level_str else None
-            bank_level  = float(bank_level_str) if bank_level_str else None
+            water_level = float(water_level_str) if water_level_str and water_level_str.replace('.', '', 1).isdigit() else None
+            bank_level  = float(bank_level_str) if bank_level_str and bank_level_str.replace('.', '', 1).isdigit() else None
 
             below_bank = None
             if water_level is not None and bank_level is not None:
@@ -144,11 +149,10 @@ def main():
     data = get_water_data()
     if not data:
         # หากดึงข้อมูลไม่ได้ ก็ยังคงบันทึกข้อผิดพลาดใน log
-        TZ_TH = pytz.timezone('Asia/Bangkok') # ใช้ TZ_TH เพื่อความชัดเจน
+        TZ_TH = pytz.timezone('Asia/Bangkok')
         now_th = datetime.now(TZ_TH)
-        # บันทึก N/A สำหรับค่าที่ไม่มี
         with open(INBURI_LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(f"{now_th.isoformat()},N/A,N/A,N/A,N/A,N/A\n") # บันทึก N/A ครบ 6 คอลัมน์
+            f.write(f"{now_th.isoformat()},N/A,N/A,N/A,N/A,N/A\n")
         print(f"[INFO] อัปเดต {INBURI_LOG_FILE} เรียบร้อย (มีข้อผิดพลาดในการดึงข้อมูล)")
         return
 
@@ -158,7 +162,6 @@ def main():
         print("WARN: ไม่สามารถดึงค่า water_level ที่ถูกต้องได้จากหน้าเว็บ")
         TZ_TH = pytz.timezone('Asia/Bangkok')
         now_th = datetime.now(TZ_TH)
-        # บันทึก N/A สำหรับค่าที่ไม่มี แม้จะดึง data ได้ แต่ water_level เป็น None/NaN
         water_level_val = data.get('water_level', 'N/A')
         bank_level_val = data.get('bank_level', 'N/A')
         status_val = data.get('status', 'N/A')
@@ -169,39 +172,37 @@ def main():
         print(f"[INFO] อัปเดต {INBURI_LOG_FILE} เรียบร้อย (water_level ไม่ถูกต้อง)")
         return
 
+    # ส่วนนี้เป็น logic การแจ้งเตือนที่ถูกปิดการใช้งานแล้ว
+    # prev = last_data.get("water_level")
+    # if prev is None:
+    #     print("[INFO] ไม่มีข้อมูลเก่า, บันทึกแต่ไม่แจ้งครั้งแรก")
+    #     need_alert = False
+    #     diff       = 0.0
+    #     direction  = ""
+    # else:
+    #     diff = current_water_level - prev
+    #     print(f"[DEBUG] prev={prev:.2f}, new={current_water_level:.2f}, diff={diff:.2f}")
+    #     if abs(diff) >= NOTIFICATION_THRESHOLD:
+    #         direction = "⬆️" if diff > 0 else "⬇️"
+    #         need_alert = True
+    #     else:
+    #         print("[INFO] diff น้อยกว่า threshold, ไม่แจ้ง")
+    #         need_alert = False
 
-    prev = last_data.get("water_level")
-    if prev is None:
-        print("[INFO] ไม่มีข้อมูลเก่า, บันทึกแต่ไม่แจ้งครั้งแรก")
-        need_alert = False
-        diff       = 0.0
-        direction  = ""
-    else:
-        diff = current_water_level - prev # ใช้ current_water_level
-        print(f"[DEBUG] prev={prev:.2f}, new={current_water_level:.2f}, diff={diff:.2f}")
-        if abs(diff) >= NOTIFICATION_THRESHOLD:
-            direction = "⬆️" if diff > 0 else "⬇️"
-            need_alert = True
-        else:
-            print("[INFO] diff น้อยกว่า threshold, ไม่แจ้ง")
-            need_alert = False
-
-    # ส่วนนี้จะถูกข้ามหากต้องการแค่รายงานสรุป (เราปิด river_alert.yml ไปแล้ว)
-    # แต่ถ้าเปิด river_alert.yml และต้องการแจ้งเตือนแยก ก็จะทำงาน
-    if need_alert:
-        msg = (
-            f"📢 แจ้งระดับน้ำ {direction}{abs(diff):.2f} ม. (อินทร์บุรี)\n"
-            "══════════════════\n"
-            f"🌊 ระดับน้ำ     : {data['water_level']} ม.\n"
-            f"🏞️ ระดับตลิ่ง    : {data['bank_level']} ม.\n"
-            f"🚦 สถานะ       : {data['status']}\n"
-            f"📐 ห่างจากตลิ่ง : {data['below_bank']} ม.\n"
-            "───────────────\n"
-            f"🕒 เวลา        : {data['time']}"
-        )
-        send_line_message(msg)
-    else:
-        print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
+    # if need_alert:
+    #     msg = (
+    #         f"📢 แจ้งระดับน้ำ {direction}{abs(diff):.2f} ม. (อินทร์บุรี)\n"
+    #         "══════════════════\n"
+    #         f"🌊 ระดับน้ำ     : {data['water_level']} ม.\n"
+    #         f"🏞️ ระดับตลิ่ง    : {data['bank_level']} ม.\n"
+    #         f"🚦 สถานะ       : {data['status']}\n"
+    #         f"📐 ห่างจากตลิ่ง : {data['below_bank']} ม.\n"
+    #         "───────────────\n"
+    #         f"🕒 เวลา        : {data['time']}"
+    #     )
+    #     send_line_message(msg)
+    # else:
+    #     print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
 
     # บันทึกค่าระดับน้ำปัจจุบันลง inburi_log.csv เสมอ
     TZ_TH = pytz.timezone('Asia/Bangkok')
