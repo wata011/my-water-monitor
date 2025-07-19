@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # ดึงประวัติทั้งหมด เพื่อป้องกันปัญหา merge
+          fetch-depth: 0 # ดึงประวัติทั้งหมด เพื่อป้องกันปัญหา Merge
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -27,6 +27,7 @@ jobs:
         with:
           author_name: "github-actions[bot]"
           author_email: "github-actions[bot]@users.noreply.github.com"
-          message: "chore: Update water data log"
+          message: "chore: Update historical_log.csv" # ข้อความ Commit
           add: "historical_log.csv"
-          push: true # ตรวจสอบให้แน่ใจว่ามีการ push
+          push: true
+          # pathspec_error_handling: ignore # อาจเพิ่มอันนี้ถ้า commit แล้วไม่มีการเปลี่ยนแปลง
