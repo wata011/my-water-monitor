@@ -34,37 +34,9 @@ except ValueError:
     print(f"[WARN] แปลง NOTIFICATION_THRESHOLD_M='{_raw}' ไม่สำเร็จ → ใช้ default={DEFAULT_THRESHOLD:.2f} m")
     NOTIFICATION_THRESHOLD = DEFAULT_THRESHOLD
 
-# LINE_TOKEN  = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") # ไม่ใช้แล้ว
-# LINE_TARGET = os.getenv("LINE_TARGET_ID") # ไม่ใช้แล้ว
-
 
 def send_line_message(msg: str):
-    """
-    ฟังก์ชันนี้ถูกปิดการใช้งานแล้ว เพื่อป้องกันการแจ้งเตือนซ้ำซ้อน
-    การแจ้งเตือนทั้งหมดจะถูกส่งจาก daily_summary.py เท่านั้น
-    """
     print("[INFO] send_line_message ถูกปิดการใช้งานใน inburi_bridge_alert.py")
-    # if DRY_RUN:
-    #     print("[DRY‑RUN] send_line_message would send:")
-    #     print(msg)
-    #     return
-
-    # if not (LINE_TOKEN and LINE_TARGET):
-    #     print("[ERROR] LINE_TOKEN/LINE_TARGET ไม่ครบ!")
-    #     return
-
-    # url = "https://api.line.me/v2/bot/message/push"
-    # headers = {
-    #     "Authorization": f"Bearer {LINE_TOKEN}",
-    #     "Content-Type":  "application/json"
-    # }
-    # payload = {
-    #     "to": LINE_TARGET,
-    #     "messages": [{"type": "text", "text": msg}]
-    # }
-    # resp = requests.post(url, headers=headers, json=payload, timeout=10)
-    # if resp.status_code != 200:
-    #     print(f"[ERROR] ส่ง LINE ล้มเหลว: {resp.status_code} {resp.text}")
 
 
 def fetch_rendered_html(url: str, timeout: int = 15) -> str:
@@ -78,6 +50,8 @@ def fetch_rendered_html(url: str, timeout: int = 15) -> str:
     opts.add_argument("--headless")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--window-size=1920,1080") # เพิ่มขนาดหน้าต่าง
+    opts.add_argument("--disable-gpu") # สำหรับบางสภาพแวดล้อม
 
     driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
@@ -85,11 +59,15 @@ def fetch_rendered_html(url: str, timeout: int = 15) -> str:
     )
     driver.get(url)
     try:
+        # รอจนกว่าตารางจะโหลดสมบูรณ์ โดยดูจาก element ที่คาดว่าจะอยู่ในตาราง
         WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "th[scope='row']"))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-striped tbody tr"))
         )
-    except Exception:
-        print("[WARN] Selenium timeout รอ table JS โหลด")
+        # อาจจะรออีกนิดเพื่อให้ JS ทำงานเสร็จ
+        import time
+        time.sleep(2) 
+    except Exception as e:
+        print(f"[WARN] Selenium timeout หรือไม่พบ element ที่คาดหวัง: {e}")
     html = driver.page_source
     driver.quit()
     return html
@@ -102,37 +80,50 @@ def get_water_data():
     print(f"[DEBUG] HTML length = {len(html)} chars")
 
     soup = BeautifulSoup(html, "html.parser")
+
+    # ค้นหาแถวที่มี "อินทร์บุรี"
+    target_row = None
     for th in soup.select("th[scope='row']"):
         if "อินทร์บุรี" in th.get_text(strip=True):
-            tr   = th.find_parent("tr")
-            cols = tr.find_all("td")
+            target_row = th.find_parent("tr")
+            break
 
-            # ดึงข้อมูลและแปลงเป็น float/string
-            water_level_str = cols[1].get_text(strip=True)
-            bank_level_str  = cols[2].get_text(strip=True)
-            status_span = tr.select_one("span.badge")
-            status_str = status_span.get_text(strip=True) if status_span else 'N/A' # แก้ไขตรงนี้
-            report_time_str = cols[6].get_text(strip=True)
+    if not target_row:
+        print("[ERROR] ไม่พบข้อมูลสถานี อินทร์บุรี ใน HTML")
+        return None
 
-            # พยายามแปลงเป็น float หากมีค่า
-            water_level = float(water_level_str) if water_level_str and water_level_str.replace('.', '', 1).isdigit() else None
-            bank_level  = float(bank_level_str) if bank_level_str and bank_level_str.replace('.', '', 1).isdigit() else None
+    cols = target_row.find_all("td")
 
-            below_bank = None
-            if water_level is not None and bank_level is not None:
-                below_bank = round(bank_level - water_level, 2)
+    # ตรวจสอบจำนวนคอลัมน์
+    if len(cols) < 7: # ควรมีอย่างน้อย 7 คอลัมน์ (0-6)
+        print(f"[ERROR] จำนวนคอลัมน์ไม่เพียงพอสำหรับสถานีอินทร์บุรี: พบ {len(cols)} คอลัมน์")
+        return None
 
-            print(f"[DEBUG] Parsed water={water_level}, bank={bank_level}, status={status_str}, below={below_bank}, time={report_time_str}")
-            return {
-                "station_name": "อินทร์บุรี",
-                "water_level":   water_level,
-                "bank_level":    bank_level,
-                "status":        status_str,
-                "below_bank":    below_bank,
-                "time":          report_time_str,
-            }
-    print("[ERROR] ไม่พบข้อมูลสถานี อินทร์บุรี ใน HTML")
-    return None
+    # ดึงข้อมูลและแปลงเป็น float/string
+    # ใช้ .get_text(strip=True) เพื่อลบช่องว่าง
+    water_level_str = cols[1].get_text(strip=True) if len(cols) > 1 else 'N/A'
+    bank_level_str  = cols[2].get_text(strip=True) if len(cols) > 2 else 'N/A'
+    status_span = cols[3].select_one("span.badge") if len(cols) > 3 else None # สถานะมักจะอยู่ใน cols[3]
+    status_str = status_span.get_text(strip=True) if status_span else (cols[3].get_text(strip=True) if len(cols) > 3 else 'N/A')
+    report_time_str = cols[6].get_text(strip=True) if len(cols) > 6 else 'N/A'
+
+    # พยายามแปลงเป็น float หากมีค่า
+    water_level = float(water_level_str) if water_level_str and water_level_str.replace('.', '', 1).isdigit() else None
+    bank_level  = float(bank_level_str) if bank_level_str and bank_level_str.replace('.', '', 1).isdigit() else None
+
+    below_bank = None
+    if water_level is not None and bank_level is not None:
+        below_bank = round(bank_level - water_level, 2)
+
+    print(f"[DEBUG] Parsed water={water_level}, bank={bank_level}, status={status_str}, below={below_bank}, time={report_time_str}")
+    return {
+        "station_name": "อินทร์บุรี",
+        "water_level":   water_level,
+        "bank_level":    bank_level,
+        "status":        status_str,
+        "below_bank":    below_bank,
+        "time":          report_time_str,
+    }
 
 
 def main():
@@ -171,38 +162,6 @@ def main():
             f.write(f"{now_th.isoformat()},{water_level_val},{bank_level_val},{status_val},{below_bank_val},{time_val}\n")
         print(f"[INFO] อัปเดต {INBURI_LOG_FILE} เรียบร้อย (water_level ไม่ถูกต้อง)")
         return
-
-    # ส่วนนี้เป็น logic การแจ้งเตือนที่ถูกปิดการใช้งานแล้ว
-    # prev = last_data.get("water_level")
-    # if prev is None:
-    #     print("[INFO] ไม่มีข้อมูลเก่า, บันทึกแต่ไม่แจ้งครั้งแรก")
-    #     need_alert = False
-    #     diff       = 0.0
-    #     direction  = ""
-    # else:
-    #     diff = current_water_level - prev
-    #     print(f"[DEBUG] prev={prev:.2f}, new={current_water_level:.2f}, diff={diff:.2f}")
-    #     if abs(diff) >= NOTIFICATION_THRESHOLD:
-    #         direction = "⬆️" if diff > 0 else "⬇️"
-    #         need_alert = True
-    #     else:
-    #         print("[INFO] diff น้อยกว่า threshold, ไม่แจ้ง")
-    #         need_alert = False
-
-    # if need_alert:
-    #     msg = (
-    #         f"📢 แจ้งระดับน้ำ {direction}{abs(diff):.2f} ม. (อินทร์บุรี)\n"
-    #         "══════════════════\n"
-    #         f"🌊 ระดับน้ำ     : {data['water_level']} ม.\n"
-    #         f"🏞️ ระดับตลิ่ง    : {data['bank_level']} ม.\n"
-    #         f"🚦 สถานะ       : {data['status']}\n"
-    #         f"📐 ห่างจากตลิ่ง : {data['below_bank']} ม.\n"
-    #         "───────────────\n"
-    #         f"🕒 เวลา        : {data['time']}"
-    #     )
-    #     send_line_message(msg)
-    # else:
-    #     print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
 
     # บันทึกค่าระดับน้ำปัจจุบันลง inburi_log.csv เสมอ
     TZ_TH = pytz.timezone('Asia/Bangkok')
