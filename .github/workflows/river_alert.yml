@@ -1,8 +1,12 @@
-name: Inbun Bridge Alert
+**Updated GitHub Actions Workflow for Option B (Persist State via Artifacts)**
+
+```yaml
+# .github/workflows/river_alert.yml
+name: Inburi Bridge Alert
 
 on:
   schedule:
-    - cron: '45 0 * * *' # รันทุกวันเวลา 00:45 UTC (07:45 น. ICT)
+    - cron: '45 0 * * *'  # รันทุกวันเวลา 00:45 UTC (07:45 น. ICT)
   workflow_dispatch: {}
 
 jobs:
@@ -10,17 +14,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download previous state
+        uses: actions/download-artifact@v3
+        with:
+          name: inburi-state
+          path: .
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Run Inburi Alert Script
         env:
+          NOTIFICATION_THRESHOLD_M: ${{ secrets.NOTIFICATION_THRESHOLD_M }}
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
         run: python inburi_bridge_alert.py
+
+      - name: Upload new state
+        uses: actions/upload-artifact@v3
+        with:
+          name: inburi-state
+          path: inburi_bridge_data.json
+
       - name: Commit and push inburi_log.csv
         run: |
           git config user.name "github-actions[bot]"
@@ -28,3 +51,11 @@ jobs:
           git add inburi_log.csv
           git commit -m "Update inburi_log.csv" || echo "No changes to commit"
           git push
+```
+
+**Where to apply the change:**
+
+* Replace your existing `.github/workflows/river_alert.yml` with the above.
+* No changes are needed in `inburi_bridge_alert.py` for state handling—artifacts will carry `inburi_bridge_data.json` between runs.
+
+Let me know if this resolves the state-persistence issue!
