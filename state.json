@@ -1,0 +1,11 @@
+{
+    "last_alert_times": {
+        "HEAT_WAVE": 1752896386.7690008
+    },
+    "last_alerted_forecasts": {
+        "HEAT_WAVE": {
+            "dt": 1752904800,
+            "value": 35.64
+        }
+    }
+}
