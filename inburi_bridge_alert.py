@@ -12,13 +12,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-from datetime import datetime # เพิ่มบรรทัดนี้
-import pytz # เพิ่มบรรทัดนี้
+from datetime import datetime
+import pytz
+import pandas as pd # เพิ่มบรรทัดนี้สำหรับ pd.notna
 
 # -------- CONFIGURATION --------
 DATA_FILE         = "inburi_bridge_data.json"
 DEFAULT_THRESHOLD = 0.1   # เมตร (10 ซม.)
-INBURI_LOG_FILE   = "inburi_log.csv" # เพิ่มบรรทัดนี้
+INBURI_LOG_FILE   = "inburi_log.csv"
 
 # ENV FLAGS
 DRY_RUN        = os.getenv("DRY_RUN", "").lower() in ("1", "true")
@@ -101,19 +102,29 @@ def get_water_data():
         if "อินทร์บุรี" in th.get_text(strip=True):
             tr   = th.find_parent("tr")
             cols = tr.find_all("td")
-            water_level = float(cols[1].get_text(strip=True))
-            bank_level  = float(cols[2].get_text(strip=True))
-            status      = tr.select_one("span.badge").get_text(strip=True)
-            below_bank  = round(bank_level - water_level, 2)
-            report_time = cols[6].get_text(strip=True)
-            print(f"[DEBUG] Parsed water={water_level}, bank={bank_level}, status={status}, below={below_bank}, time={report_time}")
+
+            # ดึงข้อมูลและแปลงเป็น float/string
+            water_level_str = cols[1].get_text(strip=True)
+            bank_level_str  = cols[2].get_text(strip=True)
+            status_str      = tr.select_one("span.badge").get_text(strip=True)
+            report_time_str = cols[6].get_text(strip=True)
+
+            # พยายามแปลงเป็น float หากมีค่า
+            water_level = float(water_level_str) if water_level_str else None
+            bank_level  = float(bank_level_str) if bank_level_str else None
+
+            below_bank = None
+            if water_level is not None and bank_level is not None:
+                below_bank = round(bank_level - water_level, 2)
+
+            print(f"[DEBUG] Parsed water={water_level}, bank={bank_level}, status={status_str}, below={below_bank}, time={report_time_str}")
             return {
                 "station_name": "อินทร์บุรี",
                 "water_level":   water_level,
                 "bank_level":    bank_level,
-                "status":        status,
+                "status":        status_str,
                 "below_bank":    below_bank,
-                "time":          report_time,
+                "time":          report_time_str,
             }
     print("[ERROR] ไม่พบข้อมูลสถานี อินทร์บุรี ใน HTML")
     return None
@@ -133,12 +144,31 @@ def main():
     data = get_water_data()
     if not data:
         # หากดึงข้อมูลไม่ได้ ก็ยังคงบันทึกข้อผิดพลาดใน log
-        TZ = pytz.timezone('Asia/Bangkok')
-        now_th = datetime.now(TZ)
+        TZ_TH = pytz.timezone('Asia/Bangkok') # ใช้ TZ_TH เพื่อความชัดเจน
+        now_th = datetime.now(TZ_TH)
+        # บันทึก N/A สำหรับค่าที่ไม่มี
         with open(INBURI_LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(f"{now_th.isoformat()},Error fetching data\n")
+            f.write(f"{now_th.isoformat()},N/A,N/A,N/A,N/A,N/A\n") # บันทึก N/A ครบ 6 คอลัมน์
         print(f"[INFO] อัปเดต {INBURI_LOG_FILE} เรียบร้อย (มีข้อผิดพลาดในการดึงข้อมูล)")
         return
+
+    # ตรวจสอบว่ามีค่า water_level ที่ถูกต้องหรือไม่
+    current_water_level = data.get("water_level")
+    if current_water_level is None or pd.isna(current_water_level):
+        print("WARN: ไม่สามารถดึงค่า water_level ที่ถูกต้องได้จากหน้าเว็บ")
+        TZ_TH = pytz.timezone('Asia/Bangkok')
+        now_th = datetime.now(TZ_TH)
+        # บันทึก N/A สำหรับค่าที่ไม่มี แม้จะดึง data ได้ แต่ water_level เป็น None/NaN
+        water_level_val = data.get('water_level', 'N/A')
+        bank_level_val = data.get('bank_level', 'N/A')
+        status_val = data.get('status', 'N/A')
+        below_bank_val = data.get('below_bank', 'N/A')
+        time_val = data.get('time', 'N/A')
+        with open(INBURI_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"{now_th.isoformat()},{water_level_val},{bank_level_val},{status_val},{below_bank_val},{time_val}\n")
+        print(f"[INFO] อัปเดต {INBURI_LOG_FILE} เรียบร้อย (water_level ไม่ถูกต้อง)")
+        return
+
 
     prev = last_data.get("water_level")
     if prev is None:
@@ -147,8 +177,8 @@ def main():
         diff       = 0.0
         direction  = ""
     else:
-        diff = data["water_level"] - prev
-        print(f"[DEBUG] prev={prev:.2f}, new={data['water_level']:.2f}, diff={diff:.2f}")
+        diff = current_water_level - prev # ใช้ current_water_level
+        print(f"[DEBUG] prev={prev:.2f}, new={current_water_level:.2f}, diff={diff:.2f}")
         if abs(diff) >= NOTIFICATION_THRESHOLD:
             direction = "⬆️" if diff > 0 else "⬇️"
             need_alert = True
@@ -156,6 +186,8 @@ def main():
             print("[INFO] diff น้อยกว่า threshold, ไม่แจ้ง")
             need_alert = False
 
+    # ส่วนนี้จะถูกข้ามหากต้องการแค่รายงานสรุป (เราปิด river_alert.yml ไปแล้ว)
+    # แต่ถ้าเปิด river_alert.yml และต้องการแจ้งเตือนแยก ก็จะทำงาน
     if need_alert:
         msg = (
             f"📢 แจ้งระดับน้ำ {direction}{abs(diff):.2f} ม. (อินทร์บุรี)\n"
@@ -172,10 +204,17 @@ def main():
         print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
 
     # บันทึกค่าระดับน้ำปัจจุบันลง inburi_log.csv เสมอ
-    TZ = pytz.timezone('Asia/Bangkok')
-    now_th = datetime.now(TZ)
+    TZ_TH = pytz.timezone('Asia/Bangkok')
+    now_th = datetime.now(TZ_TH)
+
+    water_level_val = data.get('water_level', 'N/A')
+    bank_level_val = data.get('bank_level', 'N/A')
+    status_val = data.get('status', 'N/A')
+    below_bank_val = data.get('below_bank', 'N/A')
+    time_val = data.get('time', 'N/A')
+
     with open(INBURI_LOG_FILE, 'a', encoding='utf-8') as f:
-        f.write(f"{now_th.isoformat()},{data['water_level']}\n")
+        f.write(f"{now_th.isoformat()},{water_level_val},{bank_level_val},{status_val},{below_bank_val},{time_val}\n")
     print(f"[INFO] อัปเดต {INBURI_LOG_FILE} เรียบร้อย")
 
     # บันทึก state เสมอ
