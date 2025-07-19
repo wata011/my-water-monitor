@@ -1,40 +1,42 @@
-name: Daily Summary Report
+name: Water Level and Weather Daily Summary # เปลี่ยนชื่อเพื่อให้ไม่ซ้ำกับ Workflow อื่นที่อาจมีชื่อ Daily Summary Report
 
 on:
   schedule:
-    - cron: '0 1 * * *'
-  workflow_dispatch: {}
+    # รันทุกวันเวลา 8:00 AM Asia/Bangkok (ประเทศไทย)
+    - cron: '0 1 * * *' # เวลา 01:00 UTC = 08:00 น. ในประเทศไทย
+  workflow_dispatch: {} # เพิ่มตัวเลือกนี้เพื่อให้เราสามารถรัน Workflow ด้วยมือได้จากหน้า GitHub Actions
 
 jobs:
-  summary:
+  generate_and_send_summary: # เปลี่ยนชื่อ Job เพื่อให้ไม่ซ้ำ
     runs-on: ubuntu-latest
 
-    permissions: # เพิ่มส่วนนี้เพื่ออนุญาตให้ Workflow สามารถ Push ไฟล์กลับไปยัง Repository ได้
-      contents: write # อนุญาตให้เขียนลงใน Repository
+    permissions:
+      contents: write # อนุญาตให้ Workflow สามารถ Push ไฟล์กลับไปยัง Repository ได้
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository code
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install pandas matplotlib requests pytz
 
-      - name: Run Daily Summary and Generate Graph
+      - name: Run summary script and generate image
         run: python summary_report.py
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
 
-      - name: Commit and push generated graph
-        uses: EndBug/add-and-commit@v9 # ใช้ Action สำเร็จรูปสำหรับการ Commit และ Push
+      - name: Commit and push summary graph
+        uses: EndBug/add-and-commit@v9
         with:
           author_name: "github-actions[bot]"
           author_email: "github-actions[bot]@users.noreply.github.com"
-          message: "chore: Update daily summary graph"
-          add: "chaop_summary.png" # ระบุไฟล์ที่ต้องการเพิ่มและ Commit
+          message: "chore: Generate daily water/weather summary graph"
+          add: "chaop_summary.png" # ไฟล์ที่เราต้องการ Commit กลับไป
