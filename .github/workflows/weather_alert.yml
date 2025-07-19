@@ -2,46 +2,35 @@ name: Weather Alert
 
 on:
   schedule:
-    # รันทุก 6 ชั่วโมง ที่นาทีที่ 0
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '45 0 * * *' # รันทุกวันเวลา 00:45 UTC (07:45 น. ICT)
+  workflow_dispatch: {}
 
 jobs:
-  forecast:
+  check_weather:
     runs-on: ubuntu-latest
-
     permissions:
-      contents: write
-
+      contents: write # เพิ่มสิทธิ์ write เพื่อให้ commit ได้
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
         with:
-          python-version: '3.10'
-
+          fetch-depth: 0 # ดึงประวัติทั้งหมด เพื่อป้องกันปัญหา merge
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Run weather forecast
-        run: python weather_forecaster.py
+      - name: Run Weather Forecaster Script
         env:
-          OPENWEATHER_API_KEY:      ${{ secrets.OPENWEATHER_API_KEY }}
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TARGET_ID:            ${{ secrets.LINE_TARGET_ID }}
-
-      - name: Commit and push state file
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          # ตรวจสอบว่ามีไฟล์ state.json เปลี่ยนแปลงหรือไม่
-          if [[ -n $(git status --porcelain) ]]; then
-            git add state.json
-            git commit -m "Update weather alert state"
-            git push
-            echo "State file has been updated and pushed."
-          else
-            echo "No changes in state file. Nothing to commit."
-          fi
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }} # แม้จะปิดในโค้ด Python แต่ env นี้ก็ต้องมี
+          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }} # เช่นกัน
+        run: python weather_forecaster.py
+      - name: Commit and push weather_log.csv
+        uses: EndBug/add-and-commit@v9 # ใช้ Action สำเร็จรูปสำหรับการ Commit และ Push
+        with:
+          author_name: "github-actions[bot]"
+          author_email: "github-actions[bot]@users.noreply.github.com"
+          message: "chore: Update weather log"
+          add: "weather_log.csv"
+          push: true
