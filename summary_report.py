@@ -6,6 +6,7 @@ import pytz
 import pandas as pd
 import matplotlib.pyplot as plt
 import requests
+import matplotlib.dates as mdates # เพิ่มบรรทัดนี้สำหรับจัดการวันที่ในกราฟ
 
 # ── CONFIG ──
 TZ = pytz.timezone('Asia/Bangkok')
@@ -13,25 +14,75 @@ LINE_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET = os.getenv('LINE_TARGET_ID')
 
 # Paths to your existing logs/state files
-CHAOP_LOG    = 'historical_log.csv'
-INBURI_LOG   = 'inburi_log.csv'
-WEATHER_LOG  = 'weather_log.csv'
+CHAOP_LOG    = 'historical_log.csv'      # from scraper.py
+INBURI_LOG   = 'inburi_log.csv'          # new: timestamp, water_level
+WEATHER_LOG  = 'weather_log.csv'         # new: timestamp,event_type,value
 
 # ── 1) Load & plot Chaop storage ──
 try:
     df_c = pd.read_csv(CHAOP_LOG, names=['ts','storage'], parse_dates=['ts'])
     df_c['storage'] = df_c['storage'].str.replace(r'\s*cms','',regex=True).astype(float)
+
+    # กรองข้อมูลย้อนหลัง 7 วันตามคำขอ
     cutoff = datetime.now(TZ) - timedelta(days=7)
-    sub = df_c[df_c['ts']>=cutoff]
-    plt.figure(figsize=(8,4))
-    plt.plot(sub['ts'], sub['storage'], marker='o')
-    plt.title('Chaopraya Storage (Last 7 days)')
-    plt.xlabel('Date')
-    plt.ylabel('Storage (cms)')
-    plt.tight_layout()
-    plt.savefig('chaop_summary.png')
+    sub = df_c[df_c['ts'] >= cutoff].copy() # ใช้ .copy() เพื่อหลีกเลี่ยง SettingWithCopyWarning
+
+    # ตั้งค่าสไตล์กราฟให้สวยงามและทันสมัย
+    plt.style.use('seaborn-v0_8-darkgrid') # ใช้สไตล์ seaborn-darkgrid ที่ดูดี
+    plt.rcParams['font.family'] = 'sans-serif' # ตั้งค่าฟอนต์
+    plt.rcParams['font.sans-serif'] = ['Arial', 'Tahoma', 'DejaVu Sans'] # เพิ่มฟอนต์ที่อ่านง่าย
+    plt.rcParams['axes.labelweight'] = 'bold' # ทำให้ตัวหนา
+
+    plt.figure(figsize=(12, 7)) # ปรับขนาดกราฟให้ใหญ่ขึ้นและดูสมส่วน
+
+    # พล็อตกราฟเส้นพร้อมจุด
+    plt.plot(sub['ts'], sub['storage'], 
+            marker='o', markersize=6, # เพิ่มขนาดจุด
+            linestyle='-', linewidth=2.5, # ปรับความหนาของเส้น
+            color='#1f77b4', # สีน้ำเงินสวยงาม (matplotlib default blue)
+            label='ปริมาณน้ำ') 
+
+    # เพิ่มเส้นแนวโน้ม (Trendline - Optional, ถ้าต้องการ)
+    # z = np.polyfit(mdates.date2num(sub['ts']), sub['storage'], 1)
+    # p = np.poly1d(z)
+    # plt.plot(sub['ts'], p(mdates.date2num(sub['ts'])), color='red', linestyle='--', label='แนวโน้ม')
+
+    # เพิ่มข้อความบนกราฟ (เช่น ค่าล่าสุด)
+    if not sub.empty:
+        last_value_ts = sub['ts'].iloc[-1]
+        last_value_storage = sub['storage'].iloc[-1]
+        plt.annotate(f'{last_value_storage:.1f} cms', 
+                    xy=(last_value_ts, last_value_storage), 
+                    xytext=(5, 5), textcoords='offset points', 
+                    ha='left', va='bottom', fontsize=10, color='darkgreen',
+                    bbox=dict(boxstyle="round,pad=0.3", fc="yellow", ec="darkgreen", lw=0.5, alpha=0.7))
+
+
+    plt.title('ระดับน้ำเขื่อนเจ้าพระยา (ย้อนหลัง 7 วัน)', fontsize=18, color='white', pad=20) # สีขาวบนพื้นหลังดำ
+    plt.xlabel('วันที่', fontsize=14, color='white') # สีขาว
+    plt.ylabel('ปริมาณน้ำ (ลบ.ม./วินาที)', fontsize=14, color='white') # สีขาว
+
+    # ปรับการแสดงผลของแกนวันที่
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M')) # รูปแบบ เดือน/วัน ชั่วโมง:นาที
+    plt.gca().xaxis.set_major_locator(mdates.DayLocator()) # แสดงวันหลัก
+    plt.gca().xaxis.set_minor_locator(mdates.HourLocator(interval=6)) # แสดงทุก 6 ชั่วโมง
+    plt.xticks(rotation=45, ha='right', fontsize=12, color='white') # เอียงฉลากวันที่
+    plt.yticks(fontsize=12, color='white') # สีขาว
+
+    plt.tick_params(axis='x', colors='white') # สีของขีดบนแกน X
+    plt.tick_params(axis='y', colors='white') # สีของขีดบนแกน Y
+
+    plt.legend(fontsize=12, loc='upper left') # แสดง Legend
+    plt.tight_layout() # ปรับระยะห่างให้พอดี
+
+    # ตั้งค่าพื้นหลังของกราฟให้เข้มขึ้น
+    plt.gca().set_facecolor('#2d2d2d') # สีเทาเข้ม
+    plt.gcf().set_facecolor('#1a1a1a') # สีดำสนิทสำหรับพื้นหลังทั้งหมด
+
+    plt.savefig('chaop_summary.png', dpi=150, bbox_inches='tight') # เพิ่ม dpi เพื่อคุณภาพดีขึ้น
     plt.close()
-    last_chaop = df_c.iloc[-1]
+    last_chaop = sub.iloc[-1] if not sub.empty else None # ใช้ sub แทน df_c สำหรับ last_chaop
+
 except FileNotFoundError:
     print(f"Error: {CHAOP_LOG} not found. Skipping Chaopraya data.")
     last_chaop = None
@@ -55,8 +106,23 @@ try:
     df_w = pd.read_csv(WEATHER_LOG, names=['ts','event','value'], parse_dates=['ts'])
     # ตัวกรองสำหรับพยากรณ์ล่วงหน้า (ใช้เวลาในอนาคต)
     now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
-    upcoming = df_w[df_w['ts'] > now_utc.astimezone(TZ)] # ตรวจสอบเวลาให้ตรง timezone ด้วย
-    next_evt = upcoming.iloc[0] if not upcoming.empty else None
+    # แปลง ts ใน df_w ให้เป็น UTC ก่อนเทียบ แล้วแปลงกลับเป็น TZ เพื่อแสดงผล
+    df_w['ts_utc'] = df_w['ts'].dt.tz_localize(TZ, errors='coerce').dt.tz_convert(pytz.UTC)
+    upcoming = df_w[df_w['ts_utc'] > now_utc].copy() # ใช้ .copy()
+
+    # เรียงลำดับเวลาที่ใกล้ที่สุด
+    upcoming = upcoming.sort_values(by='ts_utc').reset_index(drop=True)
+
+    next_evt = None
+    if not upcoming.empty:
+        # ใช้ ts เดิมที่อยู่ใน timezone ที่ถูกต้องสำหรับการแสดงผล
+        next_evt_row = upcoming.iloc[0]
+        next_evt = {
+            'ts': next_evt_row['ts'], 
+            'event': next_evt_row['event'], 
+            'value': next_evt_row['value']
+        }
+
 except FileNotFoundError:
     print(f"Error: {WEATHER_LOG} not found. Skipping weather data.")
     next_evt = None
@@ -84,7 +150,7 @@ else:
 if next_evt is not None:
     lines += [
         "",
-        f"⛅ ต่อไป: {next_evt.event} at {next_evt.ts.strftime('%H:%M')} (value: {next_evt.value})"
+        f"⛅ ต่อไป: {next_evt['event']} at {next_evt['ts'].strftime('%H:%M')} (value: {next_evt['value']})"
     ]
 else:
     lines.append("\n⛅ พยากรณ์อากาศ: ไม่มีเหตุการณ์สำคัญในอนาคตอันใกล้")
@@ -98,7 +164,7 @@ if not (LINE_TOKEN and LINE_TARGET):
 
 push_url = 'https://api.line.me/v2/bot/message/push'
 headers = {
-    'Authorization': f"Bearer {LINE_TOKEN}", # แก้ไขให้ใช้ f-string
+    'Authorization': f"Bearer {LINE_TOKEN}",
     'Content-Type':  "application/json"
 }
 payload = {
