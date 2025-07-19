@@ -1,40 +1,36 @@
-# .github/workflows/river_alert.yml
-name: Inburi Bridge Alert
+name: Inbun Bridge Alert
 
 on:
   schedule:
-    # รันทุก 15 นาที (UTC)
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
+    - cron: '45 0 * * *' # รันทุกวันเวลา 00:45 UTC (07:45 น. ICT)
+  workflow_dispatch: {}
 
 jobs:
-  alert:
+  check_water_level:
     runs-on: ubuntu-latest
-
-    env:
-      # บรรทัดนี้จะเปลี่ยนไปใช้ Secret ใหม่สำหรับ Inburi Bridge
-      MAKE_COM_WEBHOOK_URL:  ${{ secrets.INBURI_WEBHOOK_URL }} # นี่คือการเปลี่ยนแปลง
-      NOTIFICATION_THRESHOLD_M:  ${{ secrets.NOTIFICATION_THRESHOLD_M }}
-      FORCE_SEND: 'true' # ยังคงบังคับส่งเพื่อการทดสอบ
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python 3.10
+        with:
+          fetch-depth: 0 # ดึงประวัติทั้งหมด
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
+          python-version: '3.x' # ใช้ 3.x
       - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: ลบ inburi_bridge_data.json ก่อนรัน
-        run: |
-          if [ -f inburi_bridge_data.json ]; then
-            rm inburi_bridge_data.json
-          fi
-
-      - name: Run alert script
+        run: pip install -r requirements.txt
+      - name: Run Inburi Alert Script
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }} # Env นี้ยังต้องมี แต่ใน py script ถูกปิด Line แล้ว
+          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }}
         run: python inburi_bridge_alert.py
+      - name: Commit and push inburi_log.csv
+        uses: EndBug/add-and-commit@v9
+        with:
+          author_name: "github-actions[bot]"
+          author_email: "github-actions[bot]@users.noreply.github.com"
+          message: "chore: Update inburi_log.csv"
+          add: "inburi_log.csv"
+          pull: true # *** เพิ่มบรรทัดนี้ ***
+          push: true
