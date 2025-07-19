@@ -29,4 +29,6 @@ jobs:
           author_email: "github-actions[bot]@users.noreply.github.com"
           message: "chore: Update water data log"
           add: "historical_log.csv"
-          push: true # ตรวจสอบให้แน่ใจว่ามีการ push
+          # เพิ่ม pull strategy เพื่อดึงข้อมูลล่าสุดก่อน push ป้องกันข้อผิดพลาด
+          pull: '--rebase --autostash'
+          push: true
