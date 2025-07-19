@@ -21,6 +21,12 @@ def get_data_with_24hr_prior(df, ts_col, value_col):
     if df.empty:
         return None, None, None
 
+    # ตรวจสอบว่าคอลัมน์เวลาเป็น timezone-aware หรือไม่
+    if df[ts_col].dt.tz is None:
+        df[ts_col] = df[ts_col].dt.tz_localize(TZ, ambiguous='infer', nonexistent='shift_forward')
+    else:
+        df[ts_col] = df[ts_col].dt.tz_convert(TZ) # ให้แน่ใจว่าเป็น timezone เดียวกัน
+
     df = df.sort_values(by=ts_col).drop_duplicates(subset=[ts_col], keep='last')
 
     latest_data = df.iloc[-1]
@@ -29,7 +35,6 @@ def get_data_with_24hr_prior(df, ts_col, value_col):
     time_24hr_ago = latest_data[ts_col] - timedelta(hours=24)
 
     # ค้นหาข้อมูลที่ใกล้เคียงที่สุดกับ 24 ชั่วโมงที่แล้ว
-    # ใช้ idxmin() เพื่อหา index ของค่าที่ใกล้เคียงที่สุด
     idx_24hr_ago = (df[ts_col] - time_24hr_ago).abs().idxmin()
     data_24hr_ago = df.loc[idx_24hr_ago]
 
@@ -37,14 +42,19 @@ def get_data_with_24hr_prior(df, ts_col, value_col):
     if abs((data_24hr_ago[ts_col] - time_24hr_ago).total_seconds()) > 7200: # 7200 seconds = 2 hours
         data_24hr_ago = None # ถ้าห่างเกินไป ถือว่าไม่มีข้อมูล 24 ชม. ที่น่าเชื่อถือ
 
-    return latest_data, data_24hr_ago, df # ส่ง df กลับไปด้วยเผื่อใช้ในอนาคต
+    return latest_data, data_24hr_ago, df
+
 
 # ── 1) Load Chaopraya storage data ──
 latest_chaop = None
 chaop_24hr_ago = None
 try:
     df_c = pd.read_csv(CHAOP_LOG, names=['ts','storage'], parse_dates=['ts'])
-    df_c['storage'] = df_c['storage'].str.replace(r'\s*cms','',regex=True).astype(float)
+    df_c['storage'] = df_c['storage'].replace(r'\s*cms','',regex=True).astype(float, errors='ignore') # เพิ่ม errors='ignore'
+    # หาก df_c['storage'] ยังเป็น object (มี cms) ให้ลองแปลงอีกครั้ง
+    if df_c['storage'].dtype == object:
+         df_c['storage'] = pd.to_numeric(df_c['storage'].str.replace(r'\s*cms','',regex=True), errors='coerce')
+
 
     latest_chaop, chaop_24hr_ago, _ = get_data_with_24hr_prior(df_c, 'ts', 'storage')
 
@@ -57,13 +67,11 @@ except Exception as e:
 latest_inb = None
 inb_24hr_ago = None
 try:
-    # คาดว่า format ใน log file เป็น ts,water_level,bank_level,status,below_bank,time
     df_i = pd.read_csv(INBURI_LOG, names=['ts','water_level','bank_level','status','below_bank','time'], parse_dates=['ts'])
-
-    # แปลง 'time' column เป็น datetime เพื่อใช้ในการเปรียบเทียบ
-    # เนื่องจาก 'time' ใน log อาจเป็นแค่เวลา (HH:MM) เราต้องรวมกับวันที่จาก 'ts'
-    # หรือถ้า 'ts' คือ datetime ที่ถูกต้องแล้ว ก็ใช้ 'ts' ได้เลย
-    # สมมติว่า 'ts' คือ datetime ที่ถูกต้องแล้ว
+    # แปลงข้อมูลตัวเลขให้แน่ใจว่าถูกต้อง
+    df_i['water_level'] = pd.to_numeric(df_i['water_level'], errors='coerce')
+    df_i['bank_level'] = pd.to_numeric(df_i['bank_level'], errors='coerce')
+    df_i['below_bank'] = pd.to_numeric(df_i['below_bank'], errors='coerce')
 
     latest_inb, inb_24hr_ago, _ = get_data_with_24hr_prior(df_i, 'ts', 'water_level')
 
@@ -76,18 +84,25 @@ except Exception as e:
 next_evt = None
 try:
     df_w = pd.read_csv(WEATHER_LOG, names=['ts','event','value'], parse_dates=['ts'])
-    now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
-    df_w['ts_utc'] = df_w['ts'].dt.tz_localize(TZ, errors='coerce').dt.tz_convert(pytz.UTC)
-    upcoming = df_w[df_w['ts_utc'] > now_utc].copy()
-    upcoming = upcoming.sort_values(by='ts_utc').reset_index(drop=True)
+    # ตรวจสอบว่าคอลัมน์เวลาเป็น timezone-aware หรือไม่
+    if df_w['ts'].dt.tz is None:
+        df_w['ts'] = df_w['ts'].dt.tz_localize(TZ, ambiguous='infer', nonexistent='shift_forward')
+    else:
+        df_w['ts'] = df_w['ts'].dt.tz_convert(TZ) # ให้แน่ใจว่าเป็น timezone เดียวกัน
+
+    now_local = datetime.now(TZ)
+    upcoming = df_w[df_w['ts'] > now_local].copy() # ใช้ now_local เพื่อเปรียบเทียบใน timezone เดียวกัน
+    upcoming = upcoming.sort_values(by='ts').reset_index(drop=True) # ใช้ 'ts' ที่ปรับ timezone แล้ว
 
     if not upcoming.empty:
         next_evt_row = upcoming.iloc[0]
         next_evt = {
-            'ts': next_evt_row['ts'], 
-            'event': next_evt_row['event'], 
+            'ts': next_evt_row['ts'],
+            'event': next_evt_row['event'],
             'value': next_evt_row['value']
         }
+    else:
+        print("INFO: ไม่พบเหตุการณ์สภาพอากาศในอนาคตอันใกล้ใน weather_log.csv")
 
 except FileNotFoundError:
     print(f"Error: {WEATHER_LOG} not found. Skipping weather data.")
@@ -113,13 +128,13 @@ if latest_chaop is not None and pd.notna(latest_chaop['storage']):
         lines.append("  • ไม่มีข้อมูลเปรียบเทียบ 24 ชม. ที่แล้ว")
 else:
     lines.append("  • ไม่มีข้อมูลปริมาณน้ำท้ายเขื่อน")
-lines.append("") # บรรทัดว่าง
+lines.append("")
 
 # --- อินทร์บุรี ---
 lines.append("🏞️ **สถานการณ์น้ำสะพานอินทร์บุรี**")
 if latest_inb is not None and pd.notna(latest_inb['water_level']):
-    status_text = f" ({latest_inb.get('status', 'ไม่ระบุสถานะ')})" if latest_inb.get('status') else ""
-    lines.append(f"  • ระดับน้ำล่าสุด: {latest_inb['water_level']:.2f} ม.รทก.{status_text} ณ {latest_inb['ts'].strftime('%H:%M น.')}")
+    status_text = latest_inb.get('status') if pd.notna(latest_inb.get('status')) else 'ไม่ระบุสถานะ'
+    lines.append(f"  • ระดับน้ำล่าสุด: {latest_inb['water_level']:.2f} ม.รทก. ({status_text}) ณ {latest_inb['ts'].strftime('%H:%M น.')}")
 
     if pd.notna(latest_inb.get('below_bank')):
          lines.append(f"  • ห่างจากตลิ่ง: {latest_inb['below_bank']:.2f} ม.")
@@ -132,12 +147,13 @@ if latest_inb is not None and pd.notna(latest_inb['water_level']):
         lines.append("  • ไม่มีข้อมูลเปรียบเทียบ 24 ชม. ที่แล้ว")
 else:
     lines.append("  • ไม่มีข้อมูลระดับน้ำสะพานอินทร์บุรี")
-lines.append("") # บรรทัดว่าง
+lines.append("")
 
 # --- พยากรณ์อากาศ ---
 lines.append("⛅ **พยากรณ์อากาศ**")
 if next_evt is not None:
-    lines.append(f"  • เหตุการณ์ถัดไป: {next_evt['event']} (ค่า: {next_evt['value']})")
+    event_val_str = f" (ค่า: {next_evt['value']:.1f})" if isinstance(next_evt['value'], (int, float)) else ""
+    lines.append(f"  • เหตุการณ์ถัดไป: {next_evt['event']}{event_val_str}")
     lines.append(f"  • เวลา: {next_evt['ts'].strftime('%d/%m/%Y %H:%M น.')}")
 else:
     lines.append("  • ไม่มีเหตุการณ์สำคัญใน 12 ชั่วโมงข้างหน้า")
@@ -157,7 +173,7 @@ headers = {
 payload = {
     "to": LINE_TARGET,
     "messages": [
-        {"type":"text", "text": text} # ลบส่วนของรูปภาพออกไปแล้ว
+        {"type":"text", "text": text}
     ]
 }
 try:
