@@ -1,17 +1,16 @@
-name: Water Level and Weather Daily Summary # เปลี่ยนชื่อเพื่อให้ไม่ซ้ำกับ Workflow อื่นที่อาจมีชื่อ Daily Summary Report
+name: Water Level and Weather Daily Summary
 
 on:
   schedule:
-    # รันทุกวันเวลา 8:00 AM Asia/Bangkok (ประเทศไทย)
-    - cron: '0 1 * * *' # เวลา 01:00 UTC = 08:00 น. ในประเทศไทย
-  workflow_dispatch: {} # เพิ่มตัวเลือกนี้เพื่อให้เราสามารถรัน Workflow ด้วยมือได้จากหน้า GitHub Actions
+    - cron: '0 1 * * *'
+  workflow_dispatch: {}
 
 jobs:
-  generate_and_send_summary: # เปลี่ยนชื่อ Job เพื่อให้ไม่ซ้ำ
+  generate_and_send_summary:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write # อนุญาตให้ Workflow สามารถ Push ไฟล์กลับไปยัง Repository ได้
+      contents: write
 
     steps:
       - name: Checkout repository code
@@ -39,4 +38,4 @@ jobs:
           author_name: "github-actions[bot]"
           author_email: "github-actions[bot]@users.noreply.github.com"
           message: "chore: Generate daily water/weather summary graph"
-          add: "chaop_summary.png" # ไฟล์ที่เราต้องการ Commit กลับไป
+          add: "chaop_summary.png"
