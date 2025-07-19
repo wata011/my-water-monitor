@@ -8,6 +8,8 @@ on:
 jobs:
   check_water_level:
     runs-on: ubuntu-latest
+    permissions:      # เพิ่มส่วนนี้เข้ามา
+      contents: write # ให้สิทธิ์ในการเขียน
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
