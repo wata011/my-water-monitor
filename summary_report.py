@@ -77,15 +77,16 @@ next_evt = None
 try:
     df_w = pd.read_csv(WEATHER_LOG, names=['ts','event','value'], parse_dates=['ts'])
     now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
-    df_w['ts_utc'] = df_w['ts'].dt.tz_localize(TZ, errors='coerce').dt.tz_convert(pytz.UTC)
+    # ❗️❗️ ส่วนที่แก้ไข ❗️❗️
+    df_w['ts_utc'] = df_w['ts'].dt.tz_localize(TZ, nonexistent='NaT').dt.tz_convert(pytz.UTC)
     upcoming = df_w[df_w['ts_utc'] > now_utc].copy()
     upcoming = upcoming.sort_values(by='ts_utc').reset_index(drop=True)
 
     if not upcoming.empty:
         next_evt_row = upcoming.iloc[0]
         next_evt = {
-            'ts': next_evt_row['ts'], 
-            'event': next_evt_row['event'], 
+            'ts': next_evt_row['ts'],
+            'event': next_evt_row['event'],
             'value': next_evt_row['value']
         }
 
