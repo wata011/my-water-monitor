@@ -4,9 +4,7 @@ import json
 from datetime import datetime, timedelta
 import pytz
 import pandas as pd
-import matplotlib.pyplot as plt
 import requests
-import matplotlib.dates as mdates
 
 # ── CONFIG ──
 TZ = pytz.timezone('Asia/Bangkok')
@@ -18,94 +16,64 @@ CHAOP_LOG    = 'historical_log.csv'
 INBURI_LOG   = 'inburi_log.csv'
 WEATHER_LOG  = 'weather_log.csv'
 
-# ── 1) Load & plot Chaop storage ──
+# ── Helper function to get data and 24-hour prior data ──
+def get_data_with_24hr_prior(df, ts_col, value_col):
+    if df.empty:
+        return None, None, None
+
+    df = df.sort_values(by=ts_col).drop_duplicates(subset=[ts_col], keep='last')
+
+    latest_data = df.iloc[-1]
+
+    # หาข้อมูลเมื่อ 24 ชั่วโมงที่แล้ว
+    time_24hr_ago = latest_data[ts_col] - timedelta(hours=24)
+
+    # ค้นหาข้อมูลที่ใกล้เคียงที่สุดกับ 24 ชั่วโมงที่แล้ว
+    # ใช้ idxmin() เพื่อหา index ของค่าที่ใกล้เคียงที่สุด
+    idx_24hr_ago = (df[ts_col] - time_24hr_ago).abs().idxmin()
+    data_24hr_ago = df.loc[idx_24hr_ago]
+
+    # ตรวจสอบว่าข้อมูล 24 ชั่วโมงที่แล้วห่างจากเวลาที่ต้องการไม่เกิน 2 ชั่วโมง
+    if abs((data_24hr_ago[ts_col] - time_24hr_ago).total_seconds()) > 7200: # 7200 seconds = 2 hours
+        data_24hr_ago = None # ถ้าห่างเกินไป ถือว่าไม่มีข้อมูล 24 ชม. ที่น่าเชื่อถือ
+
+    return latest_data, data_24hr_ago, df # ส่ง df กลับไปด้วยเผื่อใช้ในอนาคต
+
+# ── 1) Load Chaopraya storage data ──
+latest_chaop = None
+chaop_24hr_ago = None
 try:
     df_c = pd.read_csv(CHAOP_LOG, names=['ts','storage'], parse_dates=['ts'])
     df_c['storage'] = df_c['storage'].str.replace(r'\s*cms','',regex=True).astype(float)
 
-    # กรองข้อมูลย้อนหลัง 7 วัน
-    cutoff = datetime.now(TZ) - timedelta(days=7)
-    sub_chaop = df_c[df_c['ts'] >= cutoff].copy()
-
-    # ตรวจสอบว่ามีข้อมูลเพียงพอสำหรับการพล็อตหรือไม่
-    if sub_chaop.empty:
-        print(f"WARN: ไม่มีข้อมูลเพียงพอใน {CHAOP_LOG} สำหรับการสร้างกราฟ 7 วันล่าสุด")
-        last_chaop = None
-    else:
-        last_chaop = sub_chaop.iloc[-1]
-
-    # --- การปรับปรุง UI กราฟ ---
-    plt.style.use('seaborn-v0_8-darkgrid') # ใช้สไตล์ darkgrid เพื่อความทันสมัย
-    plt.rcParams['font.family'] = 'sans-serif'
-    plt.rcParams['font.sans-serif'] = ['Tahoma', 'Arial Unicode MS', 'DejaVu Sans'] # เพิ่มฟอนต์ที่รองรับภาษาไทยได้ดีขึ้น
-    plt.rcParams['axes.labelweight'] = 'bold'
-    plt.rcParams['axes.titleweight'] = 'bold'
-    plt.rcParams['text.color'] = 'white' # สีตัวอักษรบนกราฟ (ชื่อแกน, หัวข้อ)
-    plt.rcParams['axes.labelcolor'] = 'white'
-    plt.rcParams['xtick.color'] = 'white'
-    plt.rcParams['ytick.color'] = 'white'
-    plt.rcParams['grid.color'] = '#444444' # สีเส้นกริด
-
-    fig, ax = plt.subplots(figsize=(14, 8)) # ปรับขนาดกราฟให้ใหญ่ขึ้น
-
-    # พล็อตกราฟเส้น
-    ax.plot(sub_chaop['ts'], sub_chaop['storage'],
-            marker='o', markersize=7,
-            linestyle='-', linewidth=2.5,
-            color='#87CEEB', # สีฟ้าสดใส (SkyBlue)
-            label='ปริมาณน้ำ (ลบ.ม./วินาที)')
-
-    # เพิ่มข้อความบนกราฟ (ค่าสุดท้าย)
-    if last_chaop is not None:
-        ax.annotate(f'{last_chaop.storage:.1f} cms',
-                    xy=(last_chaop.ts, last_chaop.storage),
-                    xytext=(10, -10), textcoords='offset points',
-                    ha='left', va='top', fontsize=12, color='#00FF7F', # สีเขียวสด (SpringGreen)
-                    bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#00FF7F", lw=1, alpha=0.9))
-
-    ax.set_title('ระดับน้ำเขื่อนเจ้าพระยา (ย้อนหลัง 7 วัน)', fontsize=20, color='white', pad=20)
-    ax.set_xlabel('วันที่และเวลา', fontsize=15, color='white')
-    ax.set_ylabel('ปริมาณน้ำ (ลบ.ม./วินาที)', fontsize=15, color='white')
-
-    # ปรับแกน X (วันที่)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%d %b %H:%M')) # รูปแบบ: 19 ก.ค. 10:30
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1)) # แสดงทุกวัน
-    ax.xaxis.set_minor_locator(mdates.HourLocator(interval=6)) # แสดงทุก 6 ชั่วโมง
-    plt.xticks(rotation=45, ha='right', fontsize=12)
-
-    # ปรับแกน Y (ปริมาณน้ำ)
-    ax.tick_params(axis='y', labelsize=12)
-
-    ax.legend(fontsize=12, loc='upper left', frameon=True, facecolor='lightgray', edgecolor='white') # ปรับ Legend
-
-    # ตั้งค่าพื้นหลัง
-    fig.set_facecolor('#1a1a1a') # พื้นหลังของ Figure
-    ax.set_facecolor('#2d2d2d') # พื้นหลังของพื้นที่กราฟ
-
-    plt.tight_layout()
-    plt.savefig('chaop_summary.png', dpi=200, bbox_inches='tight') # เพิ่ม dpi เพื่อคุณภาพดีขึ้นมาก
-    plt.close()
+    latest_chaop, chaop_24hr_ago, _ = get_data_with_24hr_prior(df_c, 'ts', 'storage')
 
 except FileNotFoundError:
     print(f"Error: {CHAOP_LOG} not found. Skipping Chaopraya data.")
-    last_chaop = None
 except Exception as e:
     print(f"Error processing {CHAOP_LOG}: {e}")
-    last_chaop = None
 
-# ── 2) Latest readings for Inburi ──
-# อ่านข้อมูลอินทร์บุรี (คาดว่า format ใน log file เป็น ts,water_level,bank_level,status,below_bank,time)
+# ── 2) Load Inburi water level data ──
+latest_inb = None
+inb_24hr_ago = None
 try:
+    # คาดว่า format ใน log file เป็น ts,water_level,bank_level,status,below_bank,time
     df_i = pd.read_csv(INBURI_LOG, names=['ts','water_level','bank_level','status','below_bank','time'], parse_dates=['ts'])
-    last_inb_data = df_i.iloc[-1] if not df_i.empty else None
+
+    # แปลง 'time' column เป็น datetime เพื่อใช้ในการเปรียบเทียบ
+    # เนื่องจาก 'time' ใน log อาจเป็นแค่เวลา (HH:MM) เราต้องรวมกับวันที่จาก 'ts'
+    # หรือถ้า 'ts' คือ datetime ที่ถูกต้องแล้ว ก็ใช้ 'ts' ได้เลย
+    # สมมติว่า 'ts' คือ datetime ที่ถูกต้องแล้ว
+
+    latest_inb, inb_24hr_ago, _ = get_data_with_24hr_prior(df_i, 'ts', 'water_level')
+
 except FileNotFoundError:
     print(f"Error: {INBURI_LOG} not found. Skipping Inburi data.")
-    last_inb_data = None
 except Exception as e:
     print(f"Error processing {INBURI_LOG}: {e}")
-    last_inb_data = None
 
 # ── 3) Next weather event (if any) ──
+next_evt = None
 try:
     df_w = pd.read_csv(WEATHER_LOG, names=['ts','event','value'], parse_dates=['ts'])
     now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
@@ -113,7 +81,6 @@ try:
     upcoming = df_w[df_w['ts_utc'] > now_utc].copy()
     upcoming = upcoming.sort_values(by='ts_utc').reset_index(drop=True)
 
-    next_evt = None
     if not upcoming.empty:
         next_evt_row = upcoming.iloc[0]
         next_evt = {
@@ -124,39 +91,56 @@ try:
 
 except FileNotFoundError:
     print(f"Error: {WEATHER_LOG} not found. Skipping weather data.")
-    next_evt = None
 except Exception as e:
     print(f"Error processing {WEATHER_LOG}: {e}")
-    next_evt = None
 
 # ── 4) Build message ──
 lines = [
-    "📊 **สรุปรายงานประจำวัน**",
-    f"🗓️ วันที่: {datetime.now(TZ).strftime('%d/%m/%Y')}",
+    "📊 **สรุปรายงานสถานการณ์น้ำและอากาศ**",
+    f"🗓️ วันที่: {datetime.now(TZ).strftime('%d/%m/%Y %H:%M น.')}",
     "",
 ]
 
-if last_chaop is not None:
-    lines.append(f"🌊 เขื่อนเจ้าพระยา: {last_chaop.storage:.1f} cms ณ {last_chaop.ts.strftime('%H:%M')}")
+# --- เขื่อนเจ้าพระยา ---
+lines.append("🌊 **สถานการณ์น้ำเขื่อนเจ้าพระยา**")
+if latest_chaop is not None and pd.notna(latest_chaop['storage']):
+    lines.append(f"  • ปริมาณน้ำท้ายเขื่อนล่าสุด: {latest_chaop['storage']:.1f} ลบ.ม./วินาที ณ {latest_chaop['ts'].strftime('%H:%M น.')}")
+    if chaop_24hr_ago is not None and pd.notna(chaop_24hr_ago['storage']):
+        diff_chaop = latest_chaop['storage'] - chaop_24hr_ago['storage']
+        change_text = "เพิ่มขึ้น" if diff_chaop > 0 else "ลดลง" if diff_chaop < 0 else "คงที่"
+        lines.append(f"  • เปลี่ยนแปลงจาก 24 ชม. ที่แล้ว: {change_text} {abs(diff_chaop):.1f} ลบ.ม./วินาที")
+    else:
+        lines.append("  • ไม่มีข้อมูลเปรียบเทียบ 24 ชม. ที่แล้ว")
 else:
-    lines.append("🌊 เขื่อนเจ้าพระยา: ไม่มีข้อมูลเขื่อนเจ้าพระยา")
+    lines.append("  • ไม่มีข้อมูลปริมาณน้ำท้ายเขื่อน")
+lines.append("") # บรรทัดว่าง
 
-# ปรับปรุงข้อความอินทร์บุรีให้ชัดเจนยิ่งขึ้น
-if last_inb_data is not None and isinstance(last_inb_data.get('water_level'), (int, float)):
-    status_text = f" ({last_inb_data.get('status', 'ไม่ระบุสถานะ')})" if last_inb_data.get('status') else ""
-    lines.append(f"🏞️ อินทร์บุรี (ระดับน้ำ): {last_inb_data['water_level']:.2f} ม.{status_text} ณ {last_inb_data['time']}")
-    if isinstance(last_inb_data.get('below_bank'), (int, float)):
-         lines.append(f"  └ ห่างจากตลิ่ง: {last_inb_data['below_bank']:.2f} ม.")
+# --- อินทร์บุรี ---
+lines.append("🏞️ **สถานการณ์น้ำสะพานอินทร์บุรี**")
+if latest_inb is not None and pd.notna(latest_inb['water_level']):
+    status_text = f" ({latest_inb.get('status', 'ไม่ระบุสถานะ')})" if latest_inb.get('status') else ""
+    lines.append(f"  • ระดับน้ำล่าสุด: {latest_inb['water_level']:.2f} ม.รทก.{status_text} ณ {latest_inb['ts'].strftime('%H:%M น.')}")
+
+    if pd.notna(latest_inb.get('below_bank')):
+         lines.append(f"  • ห่างจากตลิ่ง: {latest_inb['below_bank']:.2f} ม.")
+
+    if inb_24hr_ago is not None and pd.notna(inb_24hr_ago['water_level']):
+        diff_inb = latest_inb['water_level'] - inb_24hr_ago['water_level']
+        change_text = "เพิ่มขึ้น" if diff_inb > 0 else "ลดลง" if diff_inb < 0 else "คงที่"
+        lines.append(f"  • เปลี่ยนแปลงจาก 24 ชม. ที่แล้ว: {change_text} {abs(diff_inb):.2f} ม.")
+    else:
+        lines.append("  • ไม่มีข้อมูลเปรียบเทียบ 24 ชม. ที่แล้ว")
 else:
-    lines.append("🏞️ อินทร์บุรี: ไม่มีข้อมูลระดับน้ำ")
+    lines.append("  • ไม่มีข้อมูลระดับน้ำสะพานอินทร์บุรี")
+lines.append("") # บรรทัดว่าง
 
+# --- พยากรณ์อากาศ ---
+lines.append("⛅ **พยากรณ์อากาศ**")
 if next_evt is not None:
-    lines += [
-        "",
-        f"⛅ พยากรณ์อากาศ: {next_evt['event']} ที่ {next_evt['ts'].strftime('%H:%M')} (ค่า: {next_evt['value']})"
-    ]
+    lines.append(f"  • เหตุการณ์ถัดไป: {next_evt['event']} (ค่า: {next_evt['value']})")
+    lines.append(f"  • เวลา: {next_evt['ts'].strftime('%d/%m/%Y %H:%M น.')}")
 else:
-    lines.append("\n⛅ พยากรณ์อากาศ: ไม่มีเหตุการณ์สำคัญใน 12 ชม. ข้างหน้า") # ปรับข้อความให้ชัดเจน
+    lines.append("  • ไม่มีเหตุการณ์สำคัญใน 12 ชั่วโมงข้างหน้า")
 
 text = "\n".join(lines)
 
@@ -173,12 +157,7 @@ headers = {
 payload = {
     "to": LINE_TARGET,
     "messages": [
-        {"type":"text", "text": text},
-        {
-          "type":"image",
-          "originalContentUrl":"https://wata011.github.io/my-water-monitor/chaop_summary.png",
-          "previewImageUrl":"https://wata011.github.io/my-water-monitor/chaop_summary.png"
-        }
+        {"type":"text", "text": text} # ลบส่วนของรูปภาพออกไปแล้ว
     ]
 }
 try:
