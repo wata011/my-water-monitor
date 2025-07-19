@@ -12,9 +12,13 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+from datetime import datetime # เพิ่มบรรทัดนี้
+import pytz # เพิ่มบรรทัดนี้
+
 # -------- CONFIGURATION --------
 DATA_FILE         = "inburi_bridge_data.json"
 DEFAULT_THRESHOLD = 0.1   # เมตร (10 ซม.)
+INBURI_LOG_FILE   = "inburi_log.csv" # เพิ่มบรรทัดนี้
 
 # ENV FLAGS
 DRY_RUN        = os.getenv("DRY_RUN", "").lower() in ("1", "true")
@@ -128,6 +132,12 @@ def main():
 
     data = get_water_data()
     if not data:
+        # หากดึงข้อมูลไม่ได้ ก็ยังคงบันทึกข้อผิดพลาดใน log
+        TZ = pytz.timezone('Asia/Bangkok')
+        now_th = datetime.now(TZ)
+        with open(INBURI_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"{now_th.isoformat()},Error fetching data\n")
+        print(f"[INFO] อัปเดต {INBURI_LOG_FILE} เรียบร้อย (มีข้อผิดพลาดในการดึงข้อมูล)")
         return
 
     prev = last_data.get("water_level")
@@ -160,6 +170,13 @@ def main():
         send_line_message(msg)
     else:
         print("[INFO] ไม่มีการแจ้งเตือนในรอบนี้")
+
+    # บันทึกค่าระดับน้ำปัจจุบันลง inburi_log.csv เสมอ
+    TZ = pytz.timezone('Asia/Bangkok')
+    now_th = datetime.now(TZ)
+    with open(INBURI_LOG_FILE, 'a', encoding='utf-8') as f:
+        f.write(f"{now_th.isoformat()},{data['water_level']}\n")
+    print(f"[INFO] อัปเดต {INBURI_LOG_FILE} เรียบร้อย")
 
     # บันทึก state เสมอ
     with open(DATA_FILE, "w", encoding="utf-8") as f:
