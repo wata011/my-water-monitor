@@ -1,0 +1,46 @@
+name: Daily Summary Report # ชื่อของ Workflow นี้ ที่จะแสดงในแท็บ Actions
+
+on:
+  schedule:
+    # รันทุกวันเวลา 8:00 AM Asia/Bangkok (ประเทศไทย)
+    # ซึ่งเทียบเท่ากับเวลา 01:00 UTC (Coordinated Universal Time)
+    - cron: '0 1 * * *' # รูปแบบ cron job: นาที ชั่วโมง วันที่ เดือน วันในสัปดาห์ (0 คือนาที, 1 คือชั่วโมง)
+  workflow_dispatch: {} # เพิ่มตัวเลือกนี้เพื่อให้เราสามารถรัน Workflow ด้วยมือได้จากหน้า GitHub Actions
+
+jobs:
+  summary: # กำหนด Job ชื่อ "summary"
+    runs-on: ubuntu-latest # ระบุว่า Workflow นี้จะรันบนระบบปฏิบัติการ Ubuntu เวอร์ชันล่าสุดของ GitHub
+
+    steps: # กำหนดขั้นตอนการทำงานของ Job นี้
+      - name: Checkout code # ขั้นตอนที่ 1: ดึงโค้ดทั้งหมดจาก Repository ของเรามายังเซิร์ฟเวอร์ของ GitHub Actions
+        uses: actions/checkout@v4 # ใช้ Action สำเร็จรูปชื่อ "checkout" เวอร์ชัน 4
+
+      - name: Setup Python # ขั้นตอนที่ 2: ตั้งค่าสภาพแวดล้อม Python บนเซิร์ฟเวอร์
+        uses: actions/setup-python@v5 # ใช้ Action สำเร็จรูปชื่อ "setup-python" เวอร์ชัน 5
+        with:
+          python-version: '3.10' # ระบุว่าต้องการใช้ Python เวอร์ชัน 3.10
+
+      - name: Install dependencies # ขั้นตอนที่ 3: ติดตั้งไลบรารี Python ที่จำเป็นสำหรับสคริปต์ของเรา
+        run: | # คำสั่ง `run` จะรันคำสั่ง Shell บนเซิร์ฟเวอร์
+          pip install pandas matplotlib requests pytz # ติดตั้งไลบรารี
+
+      - name: Run Daily Summary and Generate Graph # ขั้นตอนที่ 4: รันสคริปต์ summary_report.py เพื่อสร้างรายงานสรุปและรูปกราฟ
+        run: python summary_report.py
+        env: # กำหนดค่าตัวแปรสภาพแวดล้อมให้กับสคริปต์ Python
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }} # ดึงค่า Token จาก GitHub Secrets
+          LINE_TARGET_ID: ${{ secrets.LINE_TARGET_ID }} # ดึงค่า Target ID จาก GitHub Secrets
+
+      - name: Commit and push generated graph # ขั้นตอนที่ 5: บันทึก (Commit) และส่ง (Push) ไฟล์รูปกราฟที่สร้างขึ้นใหม่กลับไปยัง Repository
+        # ขั้นตอนนี้สำคัญมาก เพราะจะทำให้ chaop_summary.png ปรากฏบน GitHub Pages
+        run: |
+          git config --global user.name 'github-actions[bot]' # กำหนดชื่อผู้ใช้สำหรับ Git Commit
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com' # กำหนดอีเมลผู้ใช้สำหรับ Git Commit
+          # ตรวจสอบว่ามีไฟล์ chaop_summary.png เปลี่ยนแปลงหรือถูกสร้างขึ้นมาหรือไม่
+          if [[ -n $(git status --porcelain) ]]; then
+            git add chaop_summary.png # เพิ่มไฟล์รูปภาพ chaop_summary.png เข้าสู่ Git
+            git commit -m "chore: Update daily summary graph" # บันทึกการเปลี่ยนแปลงด้วยข้อความ Commit
+            git push # ส่งการเปลี่ยนแปลงกลับไปยัง Repository บน GitHub
+            echo "Graph file has been updated and pushed." # แสดงข้อความแจ้งเตือน
+          else
+            echo "No changes in graph file. Nothing to commit." # แสดงข้อความหากไม่มีการเปลี่ยนแปลง
+          fi
