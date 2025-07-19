@@ -29,15 +29,14 @@ def get_data_with_24hr_prior(df, ts_col, value_col):
     time_24hr_ago = latest_data[ts_col] - timedelta(hours=24)
 
     # ค้นหาข้อมูลที่ใกล้เคียงที่สุดกับ 24 ชั่วโมงที่แล้ว
-    # ใช้ idxmin() เพื่อหา index ของค่าที่ใกล้เคียงที่สุด
     idx_24hr_ago = (df[ts_col] - time_24hr_ago).abs().idxmin()
     data_24hr_ago = df.loc[idx_24hr_ago]
 
     # ตรวจสอบว่าข้อมูล 24 ชั่วโมงที่แล้วห่างจากเวลาที่ต้องการไม่เกิน 2 ชั่วโมง
-    if abs((data_24hr_ago[ts_col] - time_24hr_ago).total_seconds()) > 7200: # 7200 seconds = 2 hours
-        data_24hr_ago = None # ถ้าห่างเกินไป ถือว่าไม่มีข้อมูล 24 ชม. ที่น่าเชื่อถือ
+    if abs((data_24hr_ago[ts_col] - time_24hr_ago).total_seconds()) > 7200:
+        data_24hr_ago = None
 
-    return latest_data, data_24hr_ago, df # ส่ง df กลับไปด้วยเผื่อใช้ในอนาคต
+    return latest_data, data_24hr_ago, df
 
 # ── 1) Load Chaopraya storage data ──
 latest_chaop = None
@@ -45,9 +44,7 @@ chaop_24hr_ago = None
 try:
     df_c = pd.read_csv(CHAOP_LOG, names=['ts','storage'], parse_dates=['ts'])
     df_c['storage'] = df_c['storage'].str.replace(r'\s*cms','',regex=True).astype(float)
-
     latest_chaop, chaop_24hr_ago, _ = get_data_with_24hr_prior(df_c, 'ts', 'storage')
-
 except FileNotFoundError:
     print(f"Error: {CHAOP_LOG} not found. Skipping Chaopraya data.")
 except Exception as e:
@@ -57,11 +54,8 @@ except Exception as e:
 latest_inb = None
 inb_24hr_ago = None
 try:
-    # คาดว่า format ใน log file เป็น ts,water_level,bank_level,status,below_bank,time
     df_i = pd.read_csv(INBURI_LOG, names=['ts','water_level','bank_level','status','below_bank','time'], parse_dates=['ts'])
-
     latest_inb, inb_24hr_ago, _ = get_data_with_24hr_prior(df_i, 'ts', 'water_level')
-
 except FileNotFoundError:
     print(f"Error: {INBURI_LOG} not found. Skipping Inburi data.")
 except Exception as e:
@@ -72,14 +66,10 @@ next_evt = None
 try:
     df_w = pd.read_csv(WEATHER_LOG, names=['ts','event','value'], parse_dates=['ts'])
     now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
-
-    # ❗️❗️ ส่วนที่แก้ไข ❗️❗️
-    # ตรวจสอบว่าข้อมูลเวลามีโซนเวลาแล้วหรือยัง
+    
     if df_w['ts'].dt.tz is None:
-        # ถ้ายังไม่มี ให้กำหนดโซนเวลาไทย แล้วแปลงเป็น UTC
         df_w['ts_utc'] = df_w['ts'].dt.tz_localize(TZ, nonexistent='NaT').dt.tz_convert(pytz.UTC)
     else:
-        # ถ้ามีอยู่แล้ว ให้แปลงเป็น UTC ได้เลย
         df_w['ts_utc'] = df_w['ts'].dt.tz_convert(pytz.UTC)
 
     upcoming = df_w[df_w['ts_utc'] > now_utc].copy()
@@ -92,7 +82,6 @@ try:
             'event': next_evt_row['event'],
             'value': next_evt_row['value']
         }
-
 except FileNotFoundError:
     print(f"Error: {WEATHER_LOG} not found. Skipping weather data.")
 except Exception as e:
@@ -117,7 +106,7 @@ if latest_chaop is not None and pd.notna(latest_chaop['storage']):
         lines.append("  • ไม่มีข้อมูลเปรียบเทียบ 24 ชม. ที่แล้ว")
 else:
     lines.append("  • ไม่มีข้อมูลปริมาณน้ำท้ายเขื่อน")
-lines.append("") # บรรทัดว่าง
+lines.append("")
 
 # --- อินทร์บุรี ---
 lines.append("🏞️ **สถานการณ์น้ำสะพานอินทร์บุรี**")
@@ -136,7 +125,7 @@ if latest_inb is not None and pd.notna(latest_inb['water_level']):
         lines.append("  • ไม่มีข้อมูลเปรียบเทียบ 24 ชม. ที่แล้ว")
 else:
     lines.append("  • ไม่มีข้อมูลระดับน้ำสะพานอินทร์บุรี")
-lines.append("") # บรรทัดว่าง
+lines.append("")
 
 # --- พยากรณ์อากาศ ---
 lines.append("⛅ **พยากรณ์อากาศ**")
@@ -161,7 +150,7 @@ headers = {
 payload = {
     "to": LINE_TARGET,
     "messages": [
-        {"type":"text", "text": text} # ลบส่วนของรูปภาพออกไปแล้ว
+        {"type":"text", "text": text}
     ]
 }
 try:
