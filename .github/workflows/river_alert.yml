@@ -8,8 +8,8 @@ on:
 jobs:
   check_water_level:
     runs-on: ubuntu-latest
-    permissions:      # เพิ่มส่วนนี้เข้ามา
-      contents: write # ให้สิทธิ์ในการเขียน
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -27,6 +27,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull
           git add inburi_log.csv
           git commit -m "Update inburi_log.csv" || echo "No changes to commit"
           git push
