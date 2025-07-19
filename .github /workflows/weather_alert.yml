@@ -1,0 +1,47 @@
+name: Weather Alert
+
+on:
+  schedule:
+    # รันทุก 6 ชั่วโมง ที่นาทีที่ 0
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run weather forecast
+        run: python weather_forecaster.py
+        env:
+          OPENWEATHER_API_KEY:      ${{ secrets.OPENWEATHER_API_KEY }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TARGET_ID:            ${{ secrets.LINE_TARGET_ID }}
+
+      - name: Commit and push state file
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          # ตรวจสอบว่ามีไฟล์ state.json เปลี่ยนแปลงหรือไม่
+          if [[ -n $(git status --porcelain) ]]; then
+            git add state.json
+            git commit -m "Update weather alert state"
+            git push
+            echo "State file has been updated and pushed."
+          else
+            echo "No changes in state file. Nothing to commit."
+          fi
