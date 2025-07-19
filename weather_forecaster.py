@@ -1,214 +1,173 @@
-import requests
+#!/usr/bin/env python3
 import os
-import time
 import json
+import requests
 from datetime import datetime, timedelta
 import pytz
+import pandas as pd # เพิ่มบรรทัดนี้
 
-# --- General settings ---
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
-LINE_TARGET_ID           = os.getenv('LINE_TARGET_ID')
-OPENWEATHER_API_KEY      = os.getenv('OPENWEATHER_API_KEY')
+# -------- CONFIGURATION --------
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+# LINE_TOKEN          = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") # ไม่ใช้แล้ว
+# LINE_TARGET         = os.getenv("LINE_TARGET_ID") # ไม่ใช้แล้ว
+WEATHER_LOG_FILE    = "weather_log.csv"
+DATA_FILE           = "weather_data.json"
 
-WEATHER_LOG_FILE = 'weather_log.csv' # เพิ่มบรรทัดนี้
+# ENV FLAGS
+DRY_RUN = os.getenv("DRY_RUN", "").lower() in ("1", "true")
 
-# Coordinates and display name for location
-LATITUDE      = 15.02
-LONGITUDE     = 100.34
-LOCATION_NAME = 'อินทร์บุรี จ.สิงห์บุรี'
+# ตั้งค่าพิกัดสำหรับ สิงห์บุรี (ตัวอย่าง)
+# คุณสามารถหาพิกัดที่แม่นยำได้จาก Google Maps หรือ OpenWeatherMap API docs
+LATITUDE  = 14.8966 # ละติจูดของสิงห์บุรี
+LONGITUDE = 100.3892 # ลองจิจูดของสิงห์บุรี
 
-# Thresholds
-RAIN_CONF_THRESHOLD = 0.3    # Probability of precipitation ≥30%
-MIN_RAIN_MM         = 5.0    # Rain volume ≥5 mm in 3h
-HEAT_THRESHOLD      = 35.0   # Max temperature ≥35°C
-
-FORECAST_HOURS = 12         # Look ahead this many hours
-COOLDOWN_HOURS = 6          # Cooldown for alerts (hours)
-STATE_FILE     = 'state.json'
+# ตั้งค่า timezone
+TZ = pytz.timezone('Asia/Bangkok')
 
 
-def read_state(path):
-    try:
-        with open(path, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {'last_alert_times': {}, 'last_alerted_forecasts': {}}
+def send_line_message(msg: str):
+    """
+    ฟังก์ชันนี้ถูกปิดการใช้งานแล้ว เพื่อป้องกันการแจ้งเตือนซ้ำซ้อน
+    การแจ้งเตือนทั้งหมดจะถูกส่งจาก daily_summary.py เท่านั้น
+    """
+    print("[INFO] send_line_message ถูกปิดการใช้งานใน weather_forecaster.py")
+    # if DRY_RUN:
+    #     print("[DRY‑RUN] send_line_message would send:")
+    #     print(msg)
+    #     return
+
+    # if not (LINE_TOKEN and LINE_TARGET):
+    #     print("[ERROR] LINE_TOKEN/LINE_TARGET ไม่ครบ!")
+    #     return
+
+    # url = "https://api.line.me/v2/bot/message/push"
+    # headers = {
+    #     "Authorization": f"Bearer {LINE_TOKEN}",
+    #     "Content-Type":  "application/json"
+    # }
+    # payload = {
+    #     "to": LINE_TARGET,
+    #     "messages": [{"type": "text", "text": msg}]
+    # }
+    # resp = requests.post(url, headers=headers, json=payload, timeout=10)
+    # if resp.status_code != 200:
+    #     print(f"[ERROR] ส่ง LINE ล้มเหลว: {resp.status_code} {resp.text}")
 
 
-def write_state(path, state):
-    with open(path, 'w') as f:
-        json.dump(state, f, indent=4)
-
-
-def format_message(event, data):
-    tz = pytz.timezone('Asia/Bangkok')
-    now = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(tz)
-    timestamp = now.strftime('%Y-%m-%d %H:%M')
-    header = f"⚡️ แจ้งเตือนสภาพอากาศ ({LOCATION_NAME}) ⚡️"
-
-    if event == 'RAIN_NOW':
-        lines = [
-            header,
-            "⛈️ ฝนกำลังตกตอนนี้",
-            f"🕒 เวลา: {timestamp} น.",
-        ]
-        return "\n".join(lines)
-
-    if event == 'FORECAST_RAIN':
-        dt = datetime.fromtimestamp(data['dt'], tz=pytz.UTC).astimezone(tz)
-        time_str = dt.strftime('%H:%M')
-        volume = data['value']
-        lines = [
-            header,
-            "🌧️ คาดว่าจะมีฝนตก",
-            f"🕒 เวลา: {time_str} น.",
-            f"💧 ปริมาณ: {volume:.1f} มม.",
-        ]
-        return "\n".join(lines)
-
-    if event == 'HEAT_WAVE':
-        dt = datetime.fromtimestamp(data['dt'], tz=pytz.UTC).astimezone(tz)
-        time_str = dt.strftime('%H:%M')
-        temp = data['value']
-        lines = [
-            header,
-            "🔥 อากาศร้อนจัด",
-            f"🕒 เวลา: {time_str} น.",
-            f"🌡️ สูงสุด: {temp:.1f}°C",
-        ]
-        return "\n".join(lines)
-
-    # Fallback
-    return f"{header}\n🕒 เวลา: {timestamp} น.\n❗️ เหตุการณ์: {event}"
-
-
-def send_line(msg):
-    if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_TARGET_ID:
-        print("Error: LINE_TOKEN or TARGET_ID not set. Skipping LINE notify.")
-        return False
-    headers = {'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}'}
-    payload = {'to': LINE_TARGET_ID, 'messages': [{'type': 'text', 'text': msg}]}
-    try:
-        r = requests.post('https://api.line.me/v2/bot/message/push', headers=headers, json=payload, timeout=10)
-        r.raise_for_status()
-        print("Successfully sent message to LINE.")
-        return True
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to send LINE message: {e}")
-        return False
-
-
-def get_current_weather_event():
+def fetch_weather_forecast():
+    """ดึงข้อมูลพยากรณ์อากาศ 5 วัน / 3 ชั่วโมงจาก OpenWeatherMap"""
     if not OPENWEATHER_API_KEY:
-        print("Error: OPENWEATHER_API_KEY not set. Skipping current weather check.")
-        return None, None
-    url = (f"https://api.openweathermap.org/data/2.5/weather?lat={LATITUDE}&lon={LONGITUDE}"
-           f"&appid={OPENWEATHER_API_KEY}&units=metric")
+        print("[ERROR] OPENWEATHER_API_KEY ไม่ได้ตั้งค่า!")
+        return None
+
+    url = (
+        f"http://api.openweathermap.org/data/2.5/forecast?"
+        f"lat={LATITUDE}&lon={LONGITUDE}&appid={OPENWEATHER_API_KEY}&units=metric"
+    )
     try:
-        resp = requests.get(url, timeout=10); resp.raise_for_status()
-        data = resp.json()
-        # If weather ID starts with 5 (rain) or 2 (thunderstorm)
-        # Full list: https://openweathermap.org/weather-conditions#Weather-condition-codes-2
-        wid = str(data['weather'][0]['id'])
-        if wid.startswith(('5', '2')):
-            return 'RAIN_NOW', {'dt': int(time.time()), 'value': None} # value is not always available for current rain
+        print(f"[DEBUG] ดึงข้อมูลจาก OpenWeatherMap: {url}")
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching current weather: {e}")
-    return None, None
+        print(f"[ERROR] ไม่สามารถดึงข้อมูลพยากรณ์อากาศได้: {e}")
+        return None
 
 
-def get_weather_event():
-    if not OPENWEATHER_API_KEY:
-        print("Error: OPENWEATHER_API_KEY not set. Skipping forecast check.")
-        return None, None
-    url = (f"https://api.openweathermap.org/data/2.5/forecast?lat={LATITUDE}&lon={LONGITUDE}"
-           f"&appid={OPENWEATHER_API_KEY}&units=metric")
-    try:
-        resp = requests.get(url, timeout=10); resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching forecast: {e}")
-        return None, None
+def parse_weather_data(forecast_data):
+    """Parse ข้อมูลพยากรณ์อากาศเพื่อหาเหตุการณ์สำคัญ"""
+    events = []
+    if not forecast_data or "list" not in forecast_data:
+        return events
 
-    now_utc = datetime.utcnow().replace(tzinfo=pytz.UTC)
-    for entry in data.get('list', []):
-        forecast_time = datetime.fromisoformat(entry['dt_txt']).replace(tzinfo=pytz.UTC)
-        # Only consider events within FORECAST_HOURS from now
-        if forecast_time - now_utc > timedelta(hours=FORECAST_HOURS):
-            break
+    for item in forecast_data["list"]:
+        dt_txt = item["dt_txt"] # เวลา UTC
+        dt_utc = datetime.strptime(dt_txt, "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.utc)
+        dt_local = dt_utc.astimezone(TZ) # แปลงเป็นเวลาท้องถิ่น
 
-        pop      = entry.get('pop', 0) # Probability of precipitation
-        rain_vol = entry.get('rain', {}).get('3h', 0) # Rain volume for the next 3 hours
-        temp_max = entry.get('main', {}).get('temp_max', 0) # Max temperature
+        # ตรวจสอบเหตุการณ์ฝนตก (rain) หรือพายุ (thunderstorm)
+        weather_main = item["weather"][0]["main"].lower()
+        weather_desc = item["weather"][0]["description"].lower()
 
-        epoch_dt = int(forecast_time.timestamp())
-        wid_str  = str(entry['weather'][0]['id']) # Weather ID string
+        event_type = None
+        event_value = None
 
-        # Check for rain forecast
-        # Weather ID starts with 5 (rain) or 2 (thunderstorm)
-        if wid_str.startswith(('5', '2')) and pop >= RAIN_CONF_THRESHOLD and rain_vol >= MIN_RAIN_MM:
-            return 'FORECAST_RAIN', {'dt': epoch_dt, 'value': rain_vol}
+        if "rain" in weather_main or "drizzle" in weather_main:
+            event_type = "ฝนตก"
+            event_value = item.get("rain", {}).get("3h", 0) # ปริมาณฝนใน 3 ชั่วโมง
+        elif "thunderstorm" in weather_main:
+            event_type = "พายุฝนฟ้าคะนอง"
+            event_value = item.get("rain", {}).get("3h", 0)
+        elif "clouds" in weather_main and "overcast clouds" in weather_desc:
+            event_type = "เมฆครึ้ม"
+            event_value = item["clouds"]["all"] # เปอร์เซ็นต์เมฆ
+        elif "clear" in weather_main:
+            event_type = "ท้องฟ้าแจ่มใส"
+            event_value = item["clouds"]["all"] # เปอร์เซ็นต์เมฆ (ควรเป็น 0)
 
-        # Check for heat wave
-        if temp_max >= HEAT_THRESHOLD:
-            return 'HEAT_WAVE', {'dt': epoch_dt, 'value': temp_max}
-    return None, None
+        if event_type:
+            events.append({
+                "timestamp": dt_local,
+                "event_type": event_type,
+                "value": event_value
+            })
+    return events
 
 
 def main():
-    state = read_state(STATE_FILE)
-    last_alert_times       = state.get('last_alert_times', {})
-    last_alerted_forecasts = state.get('last_alerted_forecasts', {})
+    print("=== เริ่ม weather_forecaster ===")
 
-    # 1) Current weather
-    event_now, data_now = get_current_weather_event()
-    if event_now == 'RAIN_NOW':
-        now_ts = time.time()
-        last_ts = last_alert_times.get(event_now, 0)
-        if now_ts - last_ts >= COOLDOWN_HOURS * 3600:
-            if send_line(format_message(event_now, data_now)):
-                state['last_alert_times'][event_now] = now_ts
-                write_state(STATE_FILE, state)
-                # บันทึกเหตุการณ์ลง weather_log.csv
-                tz = pytz.timezone('Asia/Bangkok')
-                now_th = datetime.now(tz)
-                value_to_log = data_now['value'] if data_now and 'value' in data_now else 'N/A'
-                with open(WEATHER_LOG_FILE, 'a', encoding='utf-8') as f:
-                    f.write(f"{now_th.isoformat()},{event_now},{value_to_log}\n")
-                print(f"[INFO] อัปเดต {WEATHER_LOG_FILE} สำหรับเหตุการณ์ปัจจุบัน")
-        return
-
-    # 2) Forecast
-    event_fc, data_fc = get_weather_event()
-    if not event_fc:
-        print("No significant weather events within next period.")
-        # แม้จะไม่มีเหตุการณ์ ก็ยังบันทึก log เพื่อให้เห็นว่ามีการรัน
-        tz = pytz.timezone('Asia/Bangkok')
-        now_th = datetime.now(tz)
+    forecast_data = fetch_weather_forecast()
+    if not forecast_data:
+        print("[ERROR] ไม่สามารถดึงข้อมูลพยากรณ์อากาศได้, ข้ามการประมวลผล")
+        # บันทึก N/A ลง log เพื่อให้ summary_report ไม่ขึ้น NaN
+        TZ_TH = pytz.timezone('Asia/Bangkok')
+        now_th = datetime.now(TZ_TH)
         with open(WEATHER_LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(f"{now_th.isoformat()},NO_SIGNIFICANT_EVENT,N/A\n")
-        print(f"[INFO] อัปเดต {WEATHER_LOG_FILE} เรียบร้อย (ไม่มีเหตุการณ์สำคัญ)")
+            f.write(f"{now_th.isoformat()},N/A,N/A\n")
         return
 
-    now_ts     = time.time()
-    last_ts    = last_alert_times.get(event_fc, 0)
-    fc_dt      = data_fc['dt']
-    prev       = last_alerted_forecasts.get(event_fc, {})
-    bypass     = fc_dt > prev.get('dt', 0)
-    if not bypass and now_ts - last_ts < COOLDOWN_HOURS * 3600:
-        print("Within cooldown. Skipping alert.")
-        return
+    events = parse_weather_data(forecast_data)
 
-    if send_line(format_message(event_fc, data_fc)):
-        state['last_alert_times'][event_fc]        = now_ts
-        state['last_alerted_forecasts'][event_fc] = {'dt': fc_dt, 'value': data_fc['value']}
-        write_state(STATE_FILE, state)
-        # บันทึกเหตุการณ์ลง weather_log.csv
-        tz = pytz.timezone('Asia/Bangkok')
-        now_th = datetime.now(tz)
-        with open(WEATHER_LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(f"{now_th.isoformat()},{event_fc},{data_fc['value']}\n")
-        print(f"[INFO] อัปเดต {WEATHER_LOG_FILE} สำหรับพยากรณ์อากาศ")
+    # บันทึกข้อมูลสภาพอากาศลง weather_log.csv เสมอ
+    with open(WEATHER_LOG_FILE, 'a', encoding='utf-8') as f:
+        for event in events:
+            f.write(f"{event['timestamp'].isoformat()},{event['event_type']},{event['value']}\n")
+    print(f"[INFO] อัปเดต {WEATHER_LOG_FILE} เรียบร้อย ({len(events)} เหตุการณ์)")
 
-if __name__ == '__main__':
+    # ส่วนนี้เป็น logic การแจ้งเตือนที่ถูกปิดการใช้งานแล้ว
+    # last_alert_time = None
+    # if os.path.exists(DATA_FILE):
+    #     with open(DATA_FILE, "r", encoding="utf-8") as f:
+    #         saved_data = json.load(f)
+    #         if "last_alert_time" in saved_data:
+    #             last_alert_time = datetime.fromisoformat(saved_data["last_alert_time"]).astimezone(TZ)
+
+    # now_local = datetime.now(TZ)
+    # alert_sent = False
+
+    # for event in events:
+    #     # แจ้งเตือนเฉพาะเหตุการณ์ในอนาคตอันใกล้ (เช่น 24 ชั่วโมงข้างหน้า)
+    #     # และยังไม่เคยแจ้งเตือนเหตุการณ์นี้มาก่อน
+    #     if event["timestamp"] > now_local and \
+    #        (event["timestamp"] - now_local) <= timedelta(hours=24) and \
+    #        (last_alert_time is None or event["timestamp"] > last_alert_time):
+    #         
+    #         msg = (
+    #             f"📢 พยากรณ์อากาศ: {event['event_type']} "
+    #             f"(ค่า: {event['value']})\n"
+    #             f"🕒 เวลา: {event['timestamp'].strftime('%d/%m/%Y %H:%M น.')}"
+    #         )
+    #         send_line_message(msg)
+    #         alert_sent = True
+    #         break # แจ้งเตือนแค่เหตุการณ์แรกที่สำคัญที่สุด
+
+    # if alert_sent:
+    #     with open(DATA_FILE, "w", encoding="utf-8") as f:
+    #         json.dump({"last_alert_time": events[0]["timestamp"].isoformat()}, f, ensure_ascii=False, indent=2)
+
+    print("=== จบ weather_forecaster ===")
+
+
+if __name__ == "__main__":
     main()
