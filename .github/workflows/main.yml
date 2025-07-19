@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.x' # ใช้ 3.x เพื่อให้ใช้ Python เวอร์ชันล่าสุดที่รองรับ
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Run scraper
@@ -27,7 +27,7 @@ jobs:
         with:
           author_name: "github-actions[bot]"
           author_email: "github-actions[bot]@users.noreply.github.com"
-          message: "chore: Update historical_log.csv" # ข้อความ Commit
+          message: "chore: Update historical_log.csv"
           add: "historical_log.csv"
+          pull: true # *** เพิ่มบรรทัดนี้: ให้ดึง (pull) ก่อนที่จะ commit/push ***
           push: true
-          # pathspec_error_handling: ignore # อาจเพิ่มอันนี้ถ้า commit แล้วไม่มีการเปลี่ยนแปลง
